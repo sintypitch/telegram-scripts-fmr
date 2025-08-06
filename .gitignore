@@ -31,3 +31,10 @@ Thumbs.db
 
 # Logs
 *.log
+
+
+# macOS Icon files (prevent Windows checkout issues)
+Icon
+Icon?
+Icon
+Icon*
