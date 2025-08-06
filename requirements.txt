@@ -1,0 +1,9 @@
+# Telegram automation requirements
+telethon==1.36.0
+notion-client==2.2.1
+python-dotenv==1.0.1
+pandas==2.2.0
+python-dateutil==2.9.0
+requests==2.31.0
+asyncio==3.4.3
+tzdata==2024.1
