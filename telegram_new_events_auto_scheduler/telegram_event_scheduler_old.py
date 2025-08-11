@@ -9,41 +9,32 @@ WHAT THIS SCRIPT DOES:
 This script automates the process of publishing events from Notion to Telegram:
 
 1. FETCHES events from your Notion database that are tagged with 'readyfortg'
-2. SCHEDULES them with human-like posting patterns
-3. POSTS to both test and live channels when using --live
-4. UPDATES Notion to mark events as published and prevent duplicates
+2. SCHEDULES them as silent Telegram posts distributed across time windows
+3. UPDATES Notion to mark events as published and prevent duplicates
 
 KEY FEATURES:
 -------------
-• Human-Like Posting: Mimics manual posting with bursts, gaps, and natural timing
-  - Sometimes posts 2-3 events quickly (burst)
-  - Sometimes spaces them out steadily
-  - Sometimes includes longer gaps
-  - Adds random variance to avoid predictable patterns
+• Smart Scheduling: Distributes events across 3 daily time windows
+  - PRIMARY (18:00-20:00): Priority events get prime time
+  - SECONDARY (11:00-13:00): Additional scheduling window
+  - OVERFLOW (16:00-16:30): Catch-up window for remaining events
 
-• Smart Urgency System:
-  - TODAY events: Posted ASAP with 1-2 minute intervals
-  - THIS WEEK events: Posted with 2-5 minute intervals
-  - FUTURE events: Posted with natural human patterns
+• Priority System: Events with priority=1 get scheduled first in prime slots
 
-• Optimal Time Windows:
-  - Weekdays: Morning (8:30-9:30), Lunch (12:30-13:30), Evening (19:00-21:00)
-  - Friday: Morning (9:00-11:00), Afternoon (14:00-16:00), Prime (18:00-21:00)
-  - Weekend: Different patterns for Saturday and Sunday
+• Batch Processing: Schedules up to 5 events at the same random time within
+  each window to appear natural and avoid spam detection
 
-• Command Line Options:
-  - --auto: Skip all confirmations for automation
-  - --single: Select a single event to post
-  - --dry-run: Preview scheduling without posting
-  - --live: Use live channel (also posts to test)
-  - --test: Use test channel only
+• Silent Delivery: All messages sent with silent=True (no notification sounds)
 
-• Dual Channel Posting: When using live channel, also posts to test channel
+• Duplicate Prevention: Checks Notion's 'published_on_telegram' field to avoid
+  re-posting events that have already been scheduled
+
+• Multi-day Events: Properly formats date ranges (e.g., "6-8 SEP")
 
 • Safety Features:
-  - Only updates Notion after successful upload
-  - Dry run mode for testing
-  - Shows preview of scheduling pattern
+  - Requires confirmation before posting to live channels
+  - Shows preview of what will be scheduled
+  - Updates Notion tags from 'readyfortg' to 'postedontg'
 
 REQUIREMENTS:
 -------------
@@ -74,24 +65,26 @@ Required:
 Optional:
 - TELEGRAM_LIVE_CHANNEL: Production channel name
 - TELEGRAM_TEST_CHANNEL: Test channel for dry runs
+- DEFAULT_CHANNEL: 'test' or 'live'
 - TIMEZONE: Default 'Europe/Brussels'
+- BATCH_SIZE: Events per time window (default 5)
+- MAX_SCHEDULED: Maximum total scheduled posts (default 1000)
+- PRIMARY_WINDOW_START/END: Prime time window (default 18:00-20:00)
+- SECONDARY_WINDOW_START/END: Secondary window (default 11:00-13:00)
+- OVERFLOW_WINDOW_START/END: Overflow window (default 16:00-16:30)
 
 USAGE:
 ------
 Run the script:
-    python telegram_event_scheduler.py [options]
+    python telegram_event_scheduler.py
 
-Options:
-    --auto      Skip all confirmations
-    --single    Post single event selection
-    --dry-run   Preview without posting
-    --live      Use live channel (also posts to test)
-    --test      Use test channel only
-
-Examples:
-    python telegram_event_scheduler.py --live --auto
-    python telegram_event_scheduler.py --single
-    python telegram_event_scheduler.py --dry-run
+The script will:
+1. Show how many events are ready to schedule
+2. Ask which channel to use (test/live)
+3. Require confirmation for live channel
+4. Schedule all events across multiple days
+5. Report success/failure for each event
+6. Update Notion to mark events as published
 
 ═══════════════════════════════════════════════════════════════════════════════
 """
@@ -131,8 +124,8 @@ if not TELEGRAM_API_ID or not TELEGRAM_API_HASH:
     raise ValueError(
         "\n❌ Telegram credentials not found!\n"
         "Please add to your .env file:\n"
-        "  TELEGRAM_API_ID=your_api_id\n"
-        "  TELEGRAM_API_HASH=your_api_hash\n"
+        "  TELEGRAM_API_ID=27679914\n"
+        "  TELEGRAM_API_HASH=15f69f65a61d63b292b132eb530dd56f\n"
     )
 
 api_id = int(TELEGRAM_API_ID)
@@ -141,9 +134,11 @@ api_hash = TELEGRAM_API_HASH
 # Channel Configuration
 TELEGRAM_LIVE_CHANNEL = os.getenv('TELEGRAM_LIVE_CHANNEL', 'raveinbelgium')
 TELEGRAM_TEST_CHANNEL = os.getenv('TELEGRAM_TEST_CHANNEL', 'testchannel1234123434')
+DEFAULT_CHANNEL = os.getenv('DEFAULT_CHANNEL', 'test')
 
 # Scheduler Configuration
 TIMEZONE = ZoneInfo(os.getenv('TIMEZONE', 'Europe/Brussels'))
+BATCH_SIZE = int(os.getenv('BATCH_SIZE', '5'))
 MAX_SCHEDULED = int(os.getenv('MAX_SCHEDULED', '1000'))
 
 # Human-like posting patterns
@@ -157,6 +152,20 @@ BURST_SPACING_MAX = int(os.getenv('BURST_SPACING_MAX', '180'))
 # Urgency thresholds
 URGENT_TODAY_HOURS = int(os.getenv('URGENT_TODAY_HOURS', '24'))
 URGENT_WEEK_DAYS = int(os.getenv('URGENT_WEEK_DAYS', '7'))
+
+# Parse window times from env or use defaults
+def parse_time(time_str, default):
+    if time_str:
+        h, m = map(int, time_str.split(':'))
+        return time(h, m)
+    return default
+
+PRIMARY_START = parse_time(os.getenv('PRIMARY_WINDOW_START'), time(18, 0))
+PRIMARY_END = parse_time(os.getenv('PRIMARY_WINDOW_END'), time(20, 0))
+SECONDARY_START = parse_time(os.getenv('SECONDARY_WINDOW_START'), time(11, 0))
+SECONDARY_END = parse_time(os.getenv('SECONDARY_WINDOW_END'), time(13, 0))
+OVERFLOW_START = parse_time(os.getenv('OVERFLOW_WINDOW_START'), time(16, 0))
+OVERFLOW_END = parse_time(os.getenv('OVERFLOW_WINDOW_END'), time(16, 30))
 
 # Initialize Notion client
 notion = Client(auth=NOTION_TOKEN)
@@ -212,6 +221,7 @@ def generate_human_posting_times(events: List[Dict], window_start: datetime, win
         return []
     
     result = []
+    window_duration = (window_end - window_start).total_seconds()
     
     # Group events by urgency
     urgent_today = [e for e in events if calculate_urgency(e['date']) == 'today']
@@ -380,9 +390,10 @@ def fetch_ready_events() -> list[dict]:
             lineup = lineup_rt[0]["plain_text"] if lineup_rt else "Lineup TBA"
             tags = [tag["name"] for tag in p.get("data_tags", {}).get("multi_select", [])]
 
-            # Safely get until_date
+            # Safely get until_date - handle when field exists but is None/empty
             until_date_field = p.get("until_date")
             until_date = None
+
             if until_date_field and until_date_field.get("date"):
                 until_date = until_date_field["date"].get("start")
 
@@ -407,7 +418,6 @@ def fetch_ready_events() -> list[dict]:
 
     # Sort by priority (1 = high priority) then by date
     return sorted(events, key=lambda e: (e["priority"] != 1, e["date"]))
-
 
 def count_scheduled_events() -> int:
     """Count how many events are already scheduled in Notion"""
@@ -541,7 +551,7 @@ async def schedule_single_event(client: TelegramClient, event: dict, scheduled_t
 
 
 async def schedule_all_events(channels: List[str], dry_run: bool = False, single_mode: bool = False):
-    """Main scheduling logic with human-like posting patterns"""
+    """Main scheduling logic - distributes events across time windows"""
     print("\n📊 FETCHING EVENTS FROM NOTION")
     print("=" * 50)
 
@@ -549,31 +559,6 @@ async def schedule_all_events(channels: List[str], dry_run: bool = False, single
     if not events:
         print("❌ No events found with 'readyfortg' tag.")
         return
-    
-    # Single event mode
-    if single_mode:
-        print(f"\n🎯 SINGLE EVENT MODE")
-        print("-" * 50)
-        for i, event in enumerate(events[:20], 1):  # Show max 20
-            date_str = format_event_date(event['date'], event.get('until_date'))
-            urgency = calculate_urgency(event['date'])
-            urgency_emoji = "🔥" if urgency == 'today' else "⚡" if urgency == 'this_week' else "📅"
-            print(f"{i:2}. {urgency_emoji} {date_str} | {event['title'][:40]}")
-        
-        try:
-            choice = int(input("\nSelect event number (0 to cancel): "))
-            if choice == 0:
-                print("❌ Cancelled")
-                return
-            if choice < 1 or choice > len(events):
-                print("❌ Invalid selection")
-                return
-            
-            events = [events[choice - 1]]  # Continue with just this event
-            print(f"\n✅ Selected: {events[0]['title']}")
-        except (ValueError, KeyError):
-            print("❌ Invalid input")
-            return
 
     # Check scheduling limit
     scheduled_count = count_scheduled_events()
@@ -581,108 +566,105 @@ async def schedule_all_events(channels: List[str], dry_run: bool = False, single
         print(f"⚠️  Scheduled limit reached ({MAX_SCHEDULED}).")
         return
 
-    print(f"\n✅ Found {len(events)} events to schedule")
+    print(f"✅ Found {len(events)} events to schedule")
     print(f"   Already scheduled: {scheduled_count}")
-    
-    # Count urgency levels
-    urgent_today = [e for e in events if calculate_urgency(e['date']) == 'today']
-    urgent_week = [e for e in events if calculate_urgency(e['date']) == 'this_week']
-    regular = [e for e in events if calculate_urgency(e['date']) == 'future']
-    
-    if urgent_today:
-        print(f"   🔥 TODAY: {len(urgent_today)} events")
-    if urgent_week:
-        print(f"   ⚡ THIS WEEK: {len(urgent_week)} events")
-    if regular:
-        print(f"   📅 FUTURE: {len(regular)} events")
+    print(f"   Available slots: {MAX_SCHEDULED - scheduled_count}")
+
+    # Separate priority vs regular events
+    priority_events = [e for e in events if e["priority"] == 1]
+    regular_events = [e for e in events if e["priority"] != 1]
+
+    print(f"   Priority events: {len(priority_events)}")
+    print(f"   Regular events: {len(regular_events)}")
 
     print("\n📅 SCHEDULING TO TELEGRAM")
     print("=" * 50)
-    print(f"📡 Channels: {', '.join(channels)}")
+    print(f"📡 Channel: {channel}")
     print(f"🕐 Timezone: {TIMEZONE}")
-    print(f"🤖 Mode: {'DRY RUN' if dry_run else 'LIVE'}")
+    print(f"📦 Batch size: {BATCH_SIZE}")
     print(f"🔇 Silent mode: ENABLED")
 
-    total_scheduled = 0
+    idx_priority = 0
+    idx_regular = 0
     day_offset = 0
-    events_remaining = events.copy()
-    
+    total_scheduled = 0
+
     async with TelegramClient('scheduler_session', api_id, api_hash) as client:
-        await client.start()
-        
-        while events_remaining and scheduled_count < MAX_SCHEDULED:
+        while (idx_priority < len(priority_events) or idx_regular < len(regular_events)) and scheduled_count < MAX_SCHEDULED:
             current_day = datetime.now(TIMEZONE).date() + timedelta(days=day_offset)
-            
-            # Check if we should skip today
-            urgent_count = len([e for e in events_remaining if calculate_urgency(e['date']) in ['today', 'this_week']])
-            if should_skip_today(len(events_remaining), urgent_count) and day_offset > 0:
-                print(f"\n⏭️ Skipping {current_day.strftime('%A, %Y-%m-%d')} for natural appearance")
-                day_offset += 1
-                continue
-            
-            # Get optimal windows for this day
-            windows = get_optimal_windows(current_day.weekday())
-            
-            # Calculate daily limit
-            has_urgent = urgent_count > 0
-            daily_limit = calculate_daily_limit(len(events_remaining), has_urgent)
-            daily_posted = 0
-            
-            print(f"\n📆 {current_day.strftime('%A, %Y-%m-%d')}")
-            print(f"   Daily limit: {daily_limit} events")
-            
-            for window_name, window_start, window_end in windows:
-                if not events_remaining or daily_posted >= daily_limit:
-                    break
-                    
+
+            # Define windows for this day
+            daily_windows = [
+                ("PRIMARY", PRIMARY_START, PRIMARY_END),
+                ("SECONDARY", SECONDARY_START, SECONDARY_END),
+                ("OVERFLOW", OVERFLOW_START, OVERFLOW_END)
+            ]
+
+            for window_name, window_start, window_end in daily_windows:
                 window_start_dt = datetime.combine(current_day, window_start, TIMEZONE)
                 window_end_dt = datetime.combine(current_day, window_end, TIMEZONE)
-                
+
                 # Skip past windows
                 if datetime.now(TIMEZONE) >= window_end_dt:
                     continue
-                
-                # Ensure we start at least 2 minutes in the future
-                if window_start_dt < datetime.now(TIMEZONE) + timedelta(minutes=2):
-                    window_start_dt = datetime.now(TIMEZONE) + timedelta(minutes=2)
-                
-                # Take events for this window
-                window_events = events_remaining[:min(daily_limit - daily_posted, len(events_remaining))]
-                if not window_events:
+
+                batch = []
+
+                # PRIMARY window prioritizes priority events
+                if window_name == "PRIMARY":
+                    remaining_priority = len(priority_events) - idx_priority
+
+                    # Skip only if no events left at all
+                    if remaining_priority == 0 and idx_regular >= len(regular_events):
+                        continue
+
+                    # Fill with priority events first
+                    num_priority = min(BATCH_SIZE, remaining_priority)
+                    batch.extend(priority_events[idx_priority:idx_priority + num_priority])
+                    idx_priority += num_priority
+
+                    # Fill remaining slots with regular events
+                    if len(batch) < BATCH_SIZE and idx_regular < len(regular_events):
+                        num_regular = BATCH_SIZE - len(batch)
+                        batch.extend(regular_events[idx_regular:idx_regular + num_regular])
+                        idx_regular += num_regular
+
+                else:  # SECONDARY & OVERFLOW - chronological order
+                    while len(batch) < BATCH_SIZE:
+                        if idx_priority < len(priority_events):
+                            batch.append(priority_events[idx_priority])
+                            idx_priority += 1
+                        elif idx_regular < len(regular_events):
+                            batch.append(regular_events[idx_regular])
+                            idx_regular += 1
+                        else:
+                            break
+
+                if not batch:
                     continue
-                
-                # Generate human-like posting times
-                scheduled_posts = generate_human_posting_times(window_events, window_start_dt, window_end_dt)
-                
-                if scheduled_posts:
-                    print(f"\n   📍 {window_name} window ({window_start.strftime('%H:%M')}-{window_end.strftime('%H:%M')})")
-                    
-                    for event, scheduled_time in scheduled_posts:
-                        if scheduled_count >= MAX_SCHEDULED:
-                            print(f"\n⚠️  Reached schedule limit ({MAX_SCHEDULED})")
-                            return
-                        
-                        success = await schedule_single_event(client, event, scheduled_time, channels, dry_run)
-                        if success:
-                            total_scheduled += 1
-                            scheduled_count += 1
-                            daily_posted += 1
-                            events_remaining.remove(event)
-                        
-                        # Small delay between scheduling operations
-                        if not dry_run:
-                            await asyncio.sleep(0.5)
-            
-            day_offset += 1
-            
-            # Don't schedule more than 7 days ahead
-            if day_offset > 7:
-                print("\n⚠️  Reached 7-day scheduling limit")
-                break
-    
+
+                # Check scheduling limit
+                if scheduled_count + len(batch) > MAX_SCHEDULED:
+                    print(f"\n⚠️  Would exceed schedule limit. Stopping.")
+                    return
+
+                # Schedule at random time within window
+                random_seconds = random.randint(0, int((window_end_dt - window_start_dt).total_seconds()))
+                scheduled_time = window_start_dt + timedelta(seconds=random_seconds)
+
+                print(f"\n📍 {window_name} window on {current_day.strftime('%Y-%m-%d')} at {scheduled_time.strftime('%H:%M')}")
+
+                # Schedule each event in the batch
+                for event in batch:
+                    success = await schedule_single_event(client, event, scheduled_time, channel)
+                    if success:
+                        total_scheduled += 1
+
+                scheduled_count += len(batch)
+
+            day_offset += 1  # Move to next day
+
     print(f"\n✅ COMPLETE! Scheduled {total_scheduled} events")
-    if events_remaining:
-        print(f"   ⚠️  {len(events_remaining)} events not scheduled (limits reached)")
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -690,72 +672,50 @@ async def schedule_all_events(channels: List[str], dry_run: bool = False, single
 # ═══════════════════════════════════════════════════════════════
 
 async def main():
-    """Main entry point with argument parsing"""
-    parser = argparse.ArgumentParser(
-        description="Telegram Event Scheduler - Post events with human-like patterns",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-  python telegram_event_scheduler.py --live --auto
-  python telegram_event_scheduler.py --single
-  python telegram_event_scheduler.py --dry-run
-  python telegram_event_scheduler.py --test
-        """
-    )
-    
-    parser.add_argument('--auto', action='store_true', help='Skip all confirmations')
-    parser.add_argument('--single', action='store_true', help='Select single event to post')
-    parser.add_argument('--dry-run', action='store_true', help='Preview without posting')
-    
-    channel_group = parser.add_mutually_exclusive_group()
-    channel_group.add_argument('--live', action='store_true', help='Use live channel (also posts to test)')
-    channel_group.add_argument('--test', action='store_true', help='Use test channel only')
-    
-    args = parser.parse_args()
-    
-    print("=" * 70)
-    print("      🤖 TELEGRAM EVENT SCHEDULER")
-    print("      Human-Like Posting Patterns")
-    print("=" * 70)
-    
-    # Determine channels
-    if args.live:
-        channels = [TELEGRAM_LIVE_CHANNEL, TELEGRAM_TEST_CHANNEL]
-        print(f"\n📡 Using LIVE + TEST channels")
-        
-        if not args.auto and not args.dry_run:
-            confirm = input(f"⚠️  Will post to LIVE channel ({TELEGRAM_LIVE_CHANNEL}). Continue? (yes/no): ").strip().lower()
-            if confirm not in ['yes', 'y']:
-                print("❌ Cancelled")
-                return
-    elif args.test:
-        channels = [TELEGRAM_TEST_CHANNEL]
-        print(f"\n📝 Using TEST channel only: {TELEGRAM_TEST_CHANNEL}")
+    """Main entry point for the scheduler"""
+    print("=" * 50)
+    print("      TELEGRAM EVENT SCHEDULER")
+    print("=" * 50)
+
+    # Determine which channel to use
+    if DEFAULT_CHANNEL == 'test':
+        default_channel = TELEGRAM_TEST_CHANNEL
+        default_name = "TEST"
     else:
-        # Interactive mode
-        print(f"\n📡 Available channels:")
-        print(f"   1. Test only ({TELEGRAM_TEST_CHANNEL})")
-        print(f"   2. Live + Test ({TELEGRAM_LIVE_CHANNEL} + {TELEGRAM_TEST_CHANNEL})")
-        
-        if not args.auto:
-            choice = input("\nSelect channel option (1/2): ").strip()
-            
-            if choice == "2":
-                channels = [TELEGRAM_LIVE_CHANNEL, TELEGRAM_TEST_CHANNEL]
-                if not args.dry_run:
-                    confirm = input(f"\n⚠️  Will post to LIVE channel. Continue? (yes/no): ").strip().lower()
-                    if confirm not in ['yes', 'y']:
-                        print("❌ Cancelled")
-                        return
-            else:
-                channels = [TELEGRAM_TEST_CHANNEL]
-        else:
-            # Default to test in auto mode if not specified
-            channels = [TELEGRAM_TEST_CHANNEL]
-            print("   Using test channel (default for auto mode)")
-    
-    # Run scheduler
-    await schedule_all_events(channels, args.dry_run, args.single)
+        default_channel = TELEGRAM_LIVE_CHANNEL
+        default_name = "LIVE"
+
+    print(f"\n📡 Available channels:")
+    print(f"   1. Test ({TELEGRAM_TEST_CHANNEL})")
+    print(f"   2. Live ({TELEGRAM_LIVE_CHANNEL})")
+    print(f"   3. Use default from .env ({default_name}: {default_channel})")
+
+    choice = input("\nSelect channel (1/2/3): ").strip()
+
+    if choice == "1":
+        selected_channel = TELEGRAM_TEST_CHANNEL
+        print(f"\n📌 Using TEST channel: {TELEGRAM_TEST_CHANNEL}")
+    elif choice == "2":
+        selected_channel = TELEGRAM_LIVE_CHANNEL
+        confirm = input(f"\n⚠️  LIVE channel selected ({TELEGRAM_LIVE_CHANNEL}). Are you sure? (yes/no): ").strip().lower()
+        if confirm not in ['yes', 'y']:
+            print("❌ Cancelled.")
+            return
+        print(f"\n📌 Using LIVE channel: {TELEGRAM_LIVE_CHANNEL}")
+    elif choice == "3":
+        selected_channel = default_channel
+        if default_name == "LIVE":
+            confirm = input(f"\n⚠️  Default is LIVE channel ({default_channel}). Continue? (yes/no): ").strip().lower()
+            if confirm not in ['yes', 'y']:
+                print("❌ Cancelled.")
+                return
+        print(f"\n📌 Using {default_name} channel: {default_channel}")
+    else:
+        print("❌ Invalid choice.")
+        return
+
+    # Start scheduling
+    await schedule_all_events(selected_channel)
 
 
 if __name__ == "__main__":
