@@ -173,8 +173,11 @@ URGENT_WEEK_DAYS = int(os.getenv('URGENT_WEEK_DAYS', '7'))
 # Initialize Notion client
 notion = Client(auth=NOTION_TOKEN)
 
-# Scheduling state file
-SCHEDULE_STATE_FILE = Path("telegram_schedule_state.json")
+# Get script directory for storing files
+SCRIPT_DIR = Path(__file__).parent
+
+# Scheduling state file (in script directory)
+SCHEDULE_STATE_FILE = SCRIPT_DIR / "telegram_schedule_state.json"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -719,7 +722,7 @@ async def schedule_all_events(channels: List[str], dry_run: bool = False, single
     day_offset = 0
     events_remaining = events.copy()
     
-    async with TelegramClient('scheduler_session', api_id, api_hash) as client:
+    async with TelegramClient(str(SCRIPT_DIR / 'scheduler_session'), api_id, api_hash) as client:
         await client.start()
         
         while events_remaining and scheduled_count < MAX_SCHEDULED:

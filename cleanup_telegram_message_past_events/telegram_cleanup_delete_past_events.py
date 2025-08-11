@@ -121,6 +121,7 @@ from dotenv import load_dotenv
 import os
 import sys
 import argparse
+from pathlib import Path
 
 # Load environment variables
 load_dotenv()
@@ -148,8 +149,11 @@ api_hash = TELEGRAM_API_HASH
 LIVE_CHANNEL = os.getenv('TELEGRAM_LIVE_CHANNEL', 'raveinbelgium')
 TEST_CHANNEL = os.getenv('TELEGRAM_TEST_CHANNEL', 'testchannel1234123434')
 
-# Initialize Telegram client
-client = TelegramClient('cleanup_session', api_id, api_hash)
+# Get script directory for storing session file
+SCRIPT_DIR = Path(__file__).parent
+
+# Initialize Telegram client (session file in script directory)
+client = TelegramClient(str(SCRIPT_DIR / 'cleanup_session'), api_id, api_hash)
 
 
 # ═══════════════════════════════════════════════════════════════
