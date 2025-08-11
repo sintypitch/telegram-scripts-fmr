@@ -37,8 +37,16 @@ KEY FEATURES:
   - --dry-run: Preview scheduling without posting
   - --live: Use live channel (also posts to test)
   - --test: Use test channel only
+  - --continue: Continue scheduling in same window from last run
+  - --reset-state: Clear the scheduling state and start fresh
 
 • Dual Channel Posting: When using live channel, also posts to test channel
+
+• State Tracking (JSON):
+  - Tracks scheduling sessions in telegram_schedule_state.json
+  - Groups events naturally in the same time window
+  - Use --continue to append new events to existing schedule
+  - Prevents scattering when marking events ready one by one
 
 • Safety Features:
   - Only updates Notion after successful upload
@@ -92,6 +100,8 @@ Examples:
     python telegram_event_scheduler.py --live --auto
     python telegram_event_scheduler.py --single
     python telegram_event_scheduler.py --dry-run
+    python telegram_event_scheduler.py --continue --auto
+    python telegram_event_scheduler.py --reset-state
 
 ═══════════════════════════════════════════════════════════════════════════════
 """
@@ -102,12 +112,14 @@ import os
 import requests
 import io
 import argparse
+import json
+from pathlib import Path
 from datetime import datetime, timedelta, time
 from zoneinfo import ZoneInfo
 from telethon import TelegramClient
 from notion_client import Client
 from dotenv import load_dotenv
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Optional
 
 # Load environment variables
 load_dotenv()
@@ -160,6 +172,83 @@ URGENT_WEEK_DAYS = int(os.getenv('URGENT_WEEK_DAYS', '7'))
 
 # Initialize Notion client
 notion = Client(auth=NOTION_TOKEN)
+
+# Scheduling state file
+SCHEDULE_STATE_FILE = Path("telegram_schedule_state.json")
+
+
+# ═══════════════════════════════════════════════════════════════
+# SCHEDULING STATE MANAGEMENT
+# ═══════════════════════════════════════════════════════════════
+
+def load_schedule_state() -> dict:
+    """Load the current scheduling state from JSON file"""
+    if SCHEDULE_STATE_FILE.exists():
+        try:
+            with open(SCHEDULE_STATE_FILE, 'r') as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            print("⚠️  Schedule state file corrupted, starting fresh")
+    
+    # Default state structure
+    return {
+        "last_updated": None,
+        "current_window": None,
+        "current_day": None,
+        "last_scheduled_time": None,
+        "events_in_window": [],
+        "daily_count": 0,
+        "total_scheduled_today": 0
+    }
+
+
+def save_schedule_state(state: dict):
+    """Save the scheduling state to JSON file"""
+    state["last_updated"] = datetime.now(TIMEZONE).isoformat()
+    with open(SCHEDULE_STATE_FILE, 'w') as f:
+        json.dump(state, f, indent=2, default=str)
+
+
+def get_current_window() -> Optional[Tuple[str, datetime, datetime]]:
+    """Get the current time window we're in, if any"""
+    now = datetime.now(TIMEZONE)
+    windows = get_optimal_windows(now.weekday())
+    
+    for window_name, start_time, end_time in windows:
+        window_start = datetime.combine(now.date(), start_time, TIMEZONE)
+        window_end = datetime.combine(now.date(), end_time, TIMEZONE)
+        
+        # Check if we're currently in this window (with 30 min buffer before)
+        if window_start - timedelta(minutes=30) <= now <= window_end:
+            return (window_name, window_start, window_end)
+    
+    return None
+
+
+def should_continue_in_window(state: dict) -> bool:
+    """Check if we should continue scheduling in the same window"""
+    if not state["last_scheduled_time"]:
+        return False
+    
+    last_time = datetime.fromisoformat(state["last_scheduled_time"])
+    now = datetime.now(TIMEZONE)
+    
+    # If more than 2 hours passed, start fresh
+    if (now - last_time).total_seconds() > 7200:
+        return False
+    
+    # Check if we're still in the same window
+    current = get_current_window()
+    if not current:
+        return False
+    
+    window_name, window_start, window_end = current
+    
+    # Check if the last scheduled time was in this window
+    if window_start <= last_time <= window_end:
+        return True
+    
+    return False
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -540,7 +629,7 @@ async def schedule_single_event(client: TelegramClient, event: dict, scheduled_t
         return False
 
 
-async def schedule_all_events(channels: List[str], dry_run: bool = False, single_mode: bool = False):
+async def schedule_all_events(channels: List[str], dry_run: bool = False, single_mode: bool = False, continue_mode: bool = False):
     """Main scheduling logic with human-like posting patterns"""
     print("\n📊 FETCHING EVENTS FROM NOTION")
     print("=" * 50)
@@ -603,6 +692,29 @@ async def schedule_all_events(channels: List[str], dry_run: bool = False, single
     print(f"🤖 Mode: {'DRY RUN' if dry_run else 'LIVE'}")
     print(f"🔇 Silent mode: ENABLED")
 
+    # Load scheduling state
+    state = load_schedule_state()
+    
+    # Check if we should continue from previous session
+    if continue_mode and should_continue_in_window(state):
+        print(f"\n📂 CONTINUING FROM PREVIOUS SESSION")
+        print(f"   Last scheduled: {state['last_scheduled_time']}")
+        print(f"   Events in window: {len(state['events_in_window'])}")
+        print(f"   Continuing in same window...")
+    else:
+        # Reset state for new session
+        state = {
+            "last_updated": None,
+            "current_window": None,
+            "current_day": str(datetime.now(TIMEZONE).date()),
+            "last_scheduled_time": None,
+            "events_in_window": [],
+            "daily_count": 0,
+            "total_scheduled_today": 0
+        }
+        if continue_mode:
+            print("\n📂 Starting fresh session (too much time passed or different window)")
+
     total_scheduled = 0
     day_offset = 0
     events_remaining = events.copy()
@@ -651,15 +763,27 @@ async def schedule_all_events(channels: List[str], dry_run: bool = False, single
                 if not window_events:
                     continue
                 
+                # Check if we're continuing in the same window
+                if continue_mode and state["current_window"] == window_name and state["last_scheduled_time"]:
+                    # Continue from last scheduled time
+                    last_time = datetime.fromisoformat(state["last_scheduled_time"])
+                    if last_time > window_start_dt:
+                        window_start_dt = last_time + timedelta(minutes=random.randint(2, 5))
+                
                 # Generate human-like posting times
                 scheduled_posts = generate_human_posting_times(window_events, window_start_dt, window_end_dt)
                 
                 if scheduled_posts:
                     print(f"\n   📍 {window_name} window ({window_start.strftime('%H:%M')}-{window_end.strftime('%H:%M')})")
                     
+                    # Update state for this window
+                    state["current_window"] = window_name
+                    state["current_day"] = str(current_day)
+                    
                     for event, scheduled_time in scheduled_posts:
                         if scheduled_count >= MAX_SCHEDULED:
                             print(f"\n⚠️  Reached schedule limit ({MAX_SCHEDULED})")
+                            save_schedule_state(state)
                             return
                         
                         success = await schedule_single_event(client, event, scheduled_time, channels, dry_run)
@@ -668,6 +792,20 @@ async def schedule_all_events(channels: List[str], dry_run: bool = False, single
                             scheduled_count += 1
                             daily_posted += 1
                             events_remaining.remove(event)
+                            
+                            # Update state tracking
+                            state["last_scheduled_time"] = scheduled_time.isoformat()
+                            state["events_in_window"].append({
+                                "event_id": event["id"],
+                                "title": event["title"],
+                                "scheduled_at": scheduled_time.isoformat()
+                            })
+                            state["daily_count"] = daily_posted
+                            state["total_scheduled_today"] += 1
+                            
+                            # Save state after each successful scheduling
+                            if not dry_run:
+                                save_schedule_state(state)
                         
                         # Small delay between scheduling operations
                         if not dry_run:
@@ -706,6 +844,10 @@ Examples:
     parser.add_argument('--auto', action='store_true', help='Skip all confirmations')
     parser.add_argument('--single', action='store_true', help='Select single event to post')
     parser.add_argument('--dry-run', action='store_true', help='Preview without posting')
+    parser.add_argument('--continue', dest='continue_mode', action='store_true', 
+                       help='Continue scheduling in the same window as previous run')
+    parser.add_argument('--reset-state', action='store_true', 
+                       help='Reset the scheduling state and start fresh')
     
     channel_group = parser.add_mutually_exclusive_group()
     channel_group.add_argument('--live', action='store_true', help='Use live channel (also posts to test)')
@@ -717,6 +859,15 @@ Examples:
     print("      🤖 TELEGRAM EVENT SCHEDULER")
     print("      Human-Like Posting Patterns")
     print("=" * 70)
+    
+    # Handle state reset
+    if args.reset_state:
+        if SCHEDULE_STATE_FILE.exists():
+            SCHEDULE_STATE_FILE.unlink()
+            print("\n✅ Scheduling state has been reset")
+        else:
+            print("\n📭 No state file to reset")
+        return
     
     # Determine channels
     if args.live:
@@ -755,7 +906,7 @@ Examples:
             print("   Using test channel (default for auto mode)")
     
     # Run scheduler
-    await schedule_all_events(channels, args.dry_run, args.single)
+    await schedule_all_events(channels, args.dry_run, args.single, args.continue_mode)
 
 
 if __name__ == "__main__":

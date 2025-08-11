@@ -9,6 +9,7 @@
 
 # Cache files
 event_link_cache.json
+telegram_schedule_state.json
 __pycache__/
 *.py[cod]
 *$py.class
