@@ -102,7 +102,7 @@ Examples:
 
 The script will:
 1. Ask which channel to scan (test/live) - OR use --live/--test flag
-2. Require confirmation for live channel (unless --dry-run)
+2. When using --live flag: proceeds without confirmation
 3. Scan all messages in the channel
 4. Display future events (kept)
 5. Display past events (to be deleted)
@@ -506,14 +506,10 @@ def main():
     if args.live:
         channel = LIVE_CHANNEL
         print(f"📡 Using LIVE channel: {LIVE_CHANNEL}")
-
+        
         if not args.dry_run:
-            print(f"\n⚠️  WARNING: You selected the LIVE channel ({LIVE_CHANNEL})")
-            print("   Deletions in this channel cannot be undone!")
-            confirm = input("   Are you sure you want to continue? (yes/no): ").strip().lower()
-            if confirm not in ['yes', 'y']:
-                print("\n✅ Good call! Cancelled operation.")
-                return
+            print(f"\n⚠️  WARNING: Running on LIVE channel ({LIVE_CHANNEL})")
+            print("   Deletions cannot be undone!")
         else:
             print("   (Dry run mode - no actual deletions will occur)")
 
