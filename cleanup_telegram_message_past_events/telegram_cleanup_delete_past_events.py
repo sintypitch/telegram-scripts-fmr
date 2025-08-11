@@ -90,13 +90,23 @@ USAGE:
 Run the script:
     python telegram_cleanup_delete_past_events.py
 
+Options:
+    --live    Use live channel directly (skips channel selection)
+    --test    Use test channel directly (skips channel selection)
+    --dry-run Show what would be deleted without actually deleting
+
+Examples:
+    python telegram_cleanup_delete_past_events.py --live
+    python telegram_cleanup_delete_past_events.py --test
+    python telegram_cleanup_delete_past_events.py --live --dry-run
+
 The script will:
-1. Ask which channel to scan (test/live)
-2. Require confirmation for live channel
+1. Ask which channel to scan (test/live) - OR use --live/--test flag
+2. Require confirmation for live channel (unless --dry-run)
 3. Scan all messages in the channel
 4. Display future events (kept)
 5. Display past events (to be deleted)
-6. Ask for confirmation before deleting
+6. Ask for confirmation before deleting (unless --dry-run)
 7. Delete past events if confirmed
 
 ═══════════════════════════════════════════════════════════════════════════════
@@ -109,6 +119,8 @@ import re
 from datetime import datetime
 from dotenv import load_dotenv
 import os
+import sys
+import argparse
 
 # Load environment variables
 load_dotenv()
@@ -308,7 +320,7 @@ def extract_event_title(text: str, is_weekly: bool, is_daily: bool, event_date, 
 # MAIN SCANNING FUNCTION
 # ═══════════════════════════════════════════════════════════════
 
-async def scan_and_clean_channel(channel_name: str):
+async def scan_and_clean_channel(channel_name: str, dry_run: bool = False):
     """Main function to scan channel and manage events"""
     await client.start()
 
@@ -317,6 +329,8 @@ async def scan_and_clean_channel(channel_name: str):
 
     print(f"\n📅 Current date: {today.strftime('%Y-%m-%d')} ({today.strftime('%A, %d %B %Y')})")
     print(f"📡 Scanning channel: {channel_name}")
+    if dry_run:
+        print("🧪 DRY RUN MODE - No messages will be deleted")
     print("⏳ This may take a moment for channels with many messages...\n")
 
     message_count = 0
@@ -406,29 +420,72 @@ async def scan_and_clean_channel(channel_name: str):
     if not past_df.empty:
         print(past_df[['event_date', 'title', 'url']].to_string(index=False))
 
-        # Deletion confirmation
-        print("\n" + "=" * 70)
-        print(f"⚠️  Found {len(past_df)} past events that can be deleted")
-        confirm = input("🚨 Do you want to DELETE these PAST EVENTS from Telegram? (yes/no): ").strip().lower()
-
-        if confirm in ['yes', 'y']:
-            print(f"\n🗑️ Deleting {len(past_df)} past events...")
-            deleted_count = 0
-
-            for message_id in past_df['message_id']:
-                try:
-                    await client.delete_messages(channel_name, message_id)
-                    deleted_count += 1
-                    if deleted_count % 10 == 0:
-                        print(f"   Deleted {deleted_count}/{len(past_df)} messages...")
-                except Exception as e:
-                    print(f"   ⚠️ Could not delete message {message_id}: {e}")
-
-            print(f"\n✅ Successfully deleted {deleted_count} past events!")
+        if dry_run:
+            print(f"\n🧪 DRY RUN: Would delete {len(past_df)} past events")
+            print("   Run without --dry-run to actually delete these messages")
         else:
-            print("\n❌ Deletion cancelled. No messages were deleted.")
+            # Deletion confirmation
+            print("\n" + "=" * 70)
+            print(f"⚠️  Found {len(past_df)} past events that can be deleted")
+            confirm = input("🚨 Do you want to DELETE these PAST EVENTS from Telegram? (yes/no): ").strip().lower()
+
+            if confirm in ['yes', 'y']:
+                print(f"\n🗑️ Deleting {len(past_df)} past events...")
+                deleted_count = 0
+
+                for message_id in past_df['message_id']:
+                    try:
+                        await client.delete_messages(channel_name, message_id)
+                        deleted_count += 1
+                        if deleted_count % 10 == 0:
+                            print(f"   Deleted {deleted_count}/{len(past_df)} messages...")
+                    except Exception as e:
+                        print(f"   ⚠️ Could not delete message {message_id}: {e}")
+
+                print(f"\n✅ Successfully deleted {deleted_count} past events!")
+            else:
+                print("\n❌ Deletion cancelled. No messages were deleted.")
     else:
         print("No past events found. Channel is already clean! 🎉")
+
+
+# ═══════════════════════════════════════════════════════════════
+# ARGUMENT PARSING
+# ═══════════════════════════════════════════════════════════════
+
+def parse_arguments():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description="Telegram Channel Cleanup Tool - Remove past events from your channel",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python telegram_cleanup_delete_past_events.py --live
+  python telegram_cleanup_delete_past_events.py --test
+  python telegram_cleanup_delete_past_events.py --live --dry-run
+  python telegram_cleanup_delete_past_events.py
+        """
+    )
+
+    channel_group = parser.add_mutually_exclusive_group()
+    channel_group.add_argument(
+        '--live',
+        action='store_true',
+        help='Use live channel directly (skips channel selection)'
+    )
+    channel_group.add_argument(
+        '--test',
+        action='store_true',
+        help='Use test channel directly (skips channel selection)'
+    )
+
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Show what would be deleted without actually deleting'
+    )
+
+    return parser.parse_args()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -437,36 +494,60 @@ async def scan_and_clean_channel(channel_name: str):
 
 def main():
     """Main entry point"""
+    args = parse_arguments()
+
     print("=" * 70)
     print("       🧹 TELEGRAM CHANNEL CLEANUP TOOL")
     print("=" * 70)
     print("\nThis tool will help you remove past events from your Telegram channel.")
     print("Deleted messages cannot be recovered, so please use with caution.\n")
 
-    print(f"Available channels:")
-    print(f"  📝 test: {TEST_CHANNEL}")
-    print(f"  📡 live: {LIVE_CHANNEL}")
-    print()
-
-    # Get channel selection
-    environment = input("Enter environment (test/live): ").strip().lower()
-
-    if environment == 'live':
+    # Determine channel based on arguments
+    if args.live:
         channel = LIVE_CHANNEL
-        print(f"\n⚠️  WARNING: You selected the LIVE channel ({LIVE_CHANNEL})")
-        print("   Deletions in this channel cannot be undone!")
-        confirm = input("   Are you sure you want to continue? (yes/no): ").strip().lower()
-        if confirm not in ['yes', 'y']:
-            print("\n✅ Good call! Cancelled operation.")
-            return
-    else:
+        print(f"📡 Using LIVE channel: {LIVE_CHANNEL}")
+
+        if not args.dry_run:
+            print(f"\n⚠️  WARNING: You selected the LIVE channel ({LIVE_CHANNEL})")
+            print("   Deletions in this channel cannot be undone!")
+            confirm = input("   Are you sure you want to continue? (yes/no): ").strip().lower()
+            if confirm not in ['yes', 'y']:
+                print("\n✅ Good call! Cancelled operation.")
+                return
+        else:
+            print("   (Dry run mode - no actual deletions will occur)")
+
+    elif args.test:
         channel = TEST_CHANNEL
-        print(f"\n✅ Using TEST channel: {TEST_CHANNEL}")
+        print(f"📝 Using TEST channel: {TEST_CHANNEL}")
         print("   This is safe for testing the cleanup process.")
+
+    else:
+        # Interactive mode (original behavior)
+        print(f"Available channels:")
+        print(f"  📝 test: {TEST_CHANNEL}")
+        print(f"  📡 live: {LIVE_CHANNEL}")
+        print()
+
+        # Get channel selection
+        environment = input("Enter environment (test/live): ").strip().lower()
+
+        if environment == 'live':
+            channel = LIVE_CHANNEL
+            print(f"\n⚠️  WARNING: You selected the LIVE channel ({LIVE_CHANNEL})")
+            print("   Deletions in this channel cannot be undone!")
+            confirm = input("   Are you sure you want to continue? (yes/no): ").strip().lower()
+            if confirm not in ['yes', 'y']:
+                print("\n✅ Good call! Cancelled operation.")
+                return
+        else:
+            channel = TEST_CHANNEL
+            print(f"\n✅ Using TEST channel: {TEST_CHANNEL}")
+            print("   This is safe for testing the cleanup process.")
 
     # Run the cleanup
     with client:
-        client.loop.run_until_complete(scan_and_clean_channel(channel))
+        client.loop.run_until_complete(scan_and_clean_channel(channel, args.dry_run))
 
 
 if __name__ == "__main__":
