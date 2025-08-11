@@ -320,7 +320,7 @@ def extract_event_title(text: str, is_weekly: bool, is_daily: bool, event_date, 
 # MAIN SCANNING FUNCTION
 # ═══════════════════════════════════════════════════════════════
 
-async def scan_and_clean_channel(channel_name: str, dry_run: bool = False):
+async def scan_and_clean_channel(channel_name: str, dry_run: bool = False, auto_confirm: bool = False):
     """Main function to scan channel and manage events"""
     await client.start()
 
@@ -427,7 +427,12 @@ async def scan_and_clean_channel(channel_name: str, dry_run: bool = False):
             # Deletion confirmation
             print("\n" + "=" * 70)
             print(f"⚠️  Found {len(past_df)} past events that can be deleted")
-            confirm = input("🚨 Do you want to DELETE these PAST EVENTS from Telegram? (yes/no): ").strip().lower()
+            
+            if auto_confirm:
+                confirm = 'yes'
+                print("🤖 Auto-confirming deletion (--live flag used)")
+            else:
+                confirm = input("🚨 Do you want to DELETE these PAST EVENTS from Telegram? (yes/no): ").strip().lower()
 
             if confirm in ['yes', 'y']:
                 print(f"\n🗑️ Deleting {len(past_df)} past events...")
@@ -542,8 +547,10 @@ def main():
             print("   This is safe for testing the cleanup process.")
 
     # Run the cleanup
+    # Auto-confirm deletions when using --live flag
+    auto_confirm = args.live
     with client:
-        client.loop.run_until_complete(scan_and_clean_channel(channel, args.dry_run))
+        client.loop.run_until_complete(scan_and_clean_channel(channel, args.dry_run, auto_confirm))
 
 
 if __name__ == "__main__":
