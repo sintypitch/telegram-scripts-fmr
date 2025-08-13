@@ -145,9 +145,24 @@ TELEGRAM_TEST_CHANNEL = os.getenv('TELEGRAM_TEST_CHANNEL', 'testchannel123412343
 # Cache Configuration
 CACHE_FILE = os.path.join(SCRIPT_DIR, 'telegram_messages_cache.json')
 
-# Session Configuration - use a consistent session name in the script directory
-# This session will be reused across all runs (manual, cron, PyCharm, Replit)
-SESSION_FILE = os.path.join(SCRIPT_DIR, 'updater_session')
+# Session Configuration - use environment-specific session to avoid conflicts
+def get_session_file():
+    """Get environment-specific session file to avoid conflicts between local and Replit"""
+    if 'REPL_ID' in os.environ:
+        # Replit environment - use persistent storage
+        home_dir = os.path.expanduser("~")
+        session_dir = os.path.join(home_dir, ".telegram_sessions")
+        if not os.path.exists(session_dir):
+            os.makedirs(session_dir, mode=0o700)
+        session_name = "replit_updater_session"
+    else:
+        # Local environment
+        session_dir = SCRIPT_DIR
+        session_name = "local_updater_session"
+    
+    return os.path.join(session_dir, session_name)
+
+SESSION_FILE = get_session_file()
 log_print(f"📱 Using session file: {SESSION_FILE}")
 
 TIMEZONE = ZoneInfo(os.getenv('TIMEZONE', 'Europe/Brussels'))
@@ -793,10 +808,18 @@ async def sync_events(channel: str, test_mode: bool = False):
             os.remove(session_path)
             print(f"🗑️  Deleted old session file: {session_path}")
     
-    try:
-        async with TelegramClient(SESSION_FILE, api_id, api_hash) as client:
-            for event in events:
-                stats["checked"] += 1
+    # Try to connect with auto-retry for session conflicts
+    max_retries = 2
+    retry_count = 0
+    
+    while retry_count < max_retries:
+        try:
+            async with TelegramClient(SESSION_FILE, api_id, api_hash) as client:
+                # If we get here, connection succeeded
+                log_print("✅ Connected to Telegram successfully")
+                
+                for event in events:
+                    stats["checked"] += 1
 
                 # Check if update needed
                 needs_update, reason = await check_needs_update(event, cache, channel)
@@ -967,22 +990,31 @@ async def sync_events(channel: str, test_mode: bool = False):
                     else:
                         print(f"   ❌ Error: {e}")
                         stats["errors"] += 1
-    except Exception as e:
-        if "AuthKeyDuplicatedError" in str(e.__class__.__name__):
-            print("\n⚠️  Session conflict detected. Cleaning up...")
-            # Try to delete the session and inform user
-            session_path = f"{SESSION_FILE}.session"
-            if os.path.exists(session_path):
-                os.remove(session_path)
-                print(f"🗑️  Deleted corrupted session: {session_path}")
-            
-            print("\n📱 Session cleaned. Please run the script again.")
-            print("   You may need to re-authenticate with your phone number.")
-            print("\n💡 Tip: Use --clean-session flag to force a fresh session")
-            return
-        else:
-            print(f"\n❌ Unexpected error: {e}")
-            return
+                
+                # Successfully completed all events
+                break  # Exit retry loop
+                
+        except Exception as e:
+            if "AuthKeyDuplicatedError" in str(e.__class__.__name__):
+                log_print("\n⚠️  Session conflict detected. Cleaning up...", "WARNING")
+                # Try to delete the session and retry
+                session_path = f"{SESSION_FILE}.session"
+                if os.path.exists(session_path):
+                    os.remove(session_path)
+                    log_print(f"🗑️  Deleted corrupted session: {session_path}")
+                
+                retry_count += 1
+                if retry_count < max_retries:
+                    log_print(f"🔄 Retrying connection (attempt {retry_count + 1}/{max_retries})...")
+                    await asyncio.sleep(2)  # Wait before retry
+                    continue
+                else:
+                    log_print("\n❌ Max retries reached. Session conflict persists.", "ERROR")
+                    log_print("💡 Try running with --clean-session flag")
+                    return
+            else:
+                log_print(f"\n❌ Unexpected error: {e}", "ERROR")
+                return
 
     # Save cache
     if not test_mode:
