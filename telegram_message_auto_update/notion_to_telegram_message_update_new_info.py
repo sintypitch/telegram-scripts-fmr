@@ -145,25 +145,37 @@ TELEGRAM_TEST_CHANNEL = os.getenv('TELEGRAM_TEST_CHANNEL', 'testchannel123412343
 # Cache Configuration
 CACHE_FILE = os.path.join(SCRIPT_DIR, 'telegram_messages_cache.json')
 
-# Session Configuration - use environment-specific session to avoid conflicts
+# Session Configuration - use a consistent location that works for both manual and cron
 def get_session_file():
-    """Get environment-specific session file to avoid conflicts between local and Replit"""
+    """Get session file that works for both manual runs and cron jobs"""
+    # For Replit, always use the script directory where the session was created manually
+    # This ensures cron jobs can access the same authenticated session
     if 'REPL_ID' in os.environ:
-        # Replit environment - use persistent storage
-        home_dir = os.path.expanduser("~")
-        session_dir = os.path.join(home_dir, ".telegram_sessions")
-        if not os.path.exists(session_dir):
-            os.makedirs(session_dir, mode=0o700)
-        session_name = "replit_updater_session"
+        # In Replit, use the script directory (where we manually authenticated)
+        session_dir = SCRIPT_DIR
+        session_name = "updater_session"  # Same name as before for compatibility
     else:
         # Local environment
         session_dir = SCRIPT_DIR
         session_name = "local_updater_session"
     
-    return os.path.join(session_dir, session_name)
+    # Create directory if it doesn't exist
+    if not os.path.exists(session_dir):
+        os.makedirs(session_dir, mode=0o755)
+    
+    session_path = os.path.join(session_dir, session_name)
+    
+    # Check if session file exists
+    session_file_path = f"{session_path}.session"
+    if os.path.exists(session_file_path):
+        log_print(f"📱 Found existing session: {session_file_path}")
+    else:
+        log_print(f"⚠️  No session found at: {session_file_path}")
+        log_print("   You may need to authenticate manually first")
+    
+    return session_path
 
 SESSION_FILE = get_session_file()
-log_print(f"📱 Using session file: {SESSION_FILE}")
 
 TIMEZONE = ZoneInfo(os.getenv('TIMEZONE', 'Europe/Brussels'))
 
@@ -804,6 +816,18 @@ async def sync_events(channel: str, test_mode: bool = False):
     
     while retry_count < max_retries:
         try:
+            # Check if running in automated mode (cron/scheduled)
+            is_automated = '--auto' in sys.argv or not sys.stdin.isatty()
+            
+            if is_automated:
+                # In automated mode, check session exists before trying to connect
+                session_file_path = f"{SESSION_FILE}.session"
+                if not os.path.exists(session_file_path):
+                    log_print("❌ No session file found for automated run!", "ERROR")
+                    log_print(f"   Expected session at: {session_file_path}")
+                    log_print("   Please run manually first to authenticate")
+                    return
+            
             async with TelegramClient(SESSION_FILE, api_id, api_hash) as client:
                 # If we get here, connection succeeded
                 log_print("✅ Connected to Telegram successfully")
