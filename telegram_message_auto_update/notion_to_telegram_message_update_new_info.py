@@ -88,7 +88,9 @@ TELEGRAM_LIVE_CHANNEL = os.getenv('TELEGRAM_LIVE_CHANNEL', 'raveinbelgium')
 TELEGRAM_TEST_CHANNEL = os.getenv('TELEGRAM_TEST_CHANNEL', 'testchannel1234123434')
 
 # Cache Configuration
-CACHE_FILE = 'telegram_messages_cache.json'
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+CACHE_FILE = os.path.join(SCRIPT_DIR, 'telegram_messages_cache.json')
+SESSION_FILE = os.path.join(SCRIPT_DIR, 'updater_session')
 TIMEZONE = ZoneInfo(os.getenv('TIMEZONE', 'Europe/Brussels'))
 
 # Initialize Notion client
@@ -154,8 +156,8 @@ class TelegramMessage:
 class MessageCache:
     """Manages the JSON cache of Telegram messages"""
 
-    def __init__(self, cache_file: str = CACHE_FILE):
-        self.cache_file = cache_file
+    def __init__(self, cache_file: str = None):
+        self.cache_file = cache_file or CACHE_FILE
         self.messages: Dict[str, TelegramMessage] = {}  # Changed to use string keys
         self.load()
 
@@ -724,8 +726,9 @@ async def sync_events(channel: str, test_mode: bool = False):
     print("\n🔄 CHECKING FOR UPDATES")
     print("=" * 50)
 
-    async with TelegramClient('updater_session', api_id, api_hash) as client:
-        for event in events:
+    try:
+        async with TelegramClient(SESSION_FILE, api_id, api_hash) as client:
+            for event in events:
             stats["checked"] += 1
 
             # Check if update needed
@@ -897,6 +900,17 @@ async def sync_events(channel: str, test_mode: bool = False):
                 else:
                     print(f"   ❌ Error: {e}")
                     stats["errors"] += 1
+    except Exception as e:
+        if "AuthKeyDuplicatedError" in str(e.__class__.__name__):
+            print("\n❌ Session file error - The session is being used from multiple locations.")
+            print("   To fix this on Replit:")
+            print("   1. Delete the session file in the script directory")
+            print("   2. Re-run the script to create a new session")
+            print("   3. You'll need to re-authenticate with Telegram")
+            return
+        else:
+            print(f"\n❌ Unexpected error: {e}")
+            return
 
     # Save cache
     if not test_mode:
