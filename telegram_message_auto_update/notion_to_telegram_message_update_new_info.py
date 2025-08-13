@@ -40,6 +40,7 @@ Run the script:
 Options:
     --test    Dry run mode (no actual updates)
     --live    Use live channel
+    --auto    Skip all confirmations (for automation)
 
 ═══════════════════════════════════════════════════════════════════════════════
 """
@@ -906,6 +907,7 @@ async def main():
     # Parse command line arguments
     test_mode = '--test' in sys.argv
     use_live = '--live' in sys.argv
+    auto_mode = '--auto' in sys.argv
 
     if test_mode:
         print("\n🧪 TEST MODE - no actual updates")
@@ -915,35 +917,40 @@ async def main():
         channel = TELEGRAM_LIVE_CHANNEL
         print(f"\n📡 Using LIVE channel: {channel}")
         print("   This is where your actual messages are posted")
-        if not test_mode:
+        if not test_mode and not auto_mode:
             confirm = input("⚠️  Are you sure you want to update LIVE messages? (yes/no): ")
             if confirm.lower() not in ['yes', 'y']:
                 print("❌ Cancelled")
                 return
     else:
         # Default to live channel for reading (since that's where messages are)
-        # but warn the user
-        print(f"\n📡 Channel selection:")
-        print(f"   1. LIVE channel ({TELEGRAM_LIVE_CHANNEL}) - where your messages are")
-        print(f"   2. TEST channel ({TELEGRAM_TEST_CHANNEL}) - for testing")
-
-        choice = input("\nSelect channel (1/2) [default: 1]: ").strip() or "1"
-
-        if choice == "1":
+        if auto_mode:
+            # In auto mode, default to live channel
             channel = TELEGRAM_LIVE_CHANNEL
-            print(f"\n✅ Using LIVE channel: {channel}")
-            if not test_mode:
-                confirm = input("⚠️  This will update LIVE messages. Continue? (yes/no): ")
-                if confirm.lower() not in ['yes', 'y']:
-                    print("❌ Cancelled")
-                    return
-        elif choice == "2":
-            channel = TELEGRAM_TEST_CHANNEL
-            print(f"\n✅ Using TEST channel: {channel}")
-            print("⚠️  Note: Messages might not exist in test channel")
+            print(f"\n📡 Auto mode: Using LIVE channel: {channel}")
         else:
-            print("❌ Invalid choice")
-            return
+            # Manual mode - ask for channel selection
+            print(f"\n📡 Channel selection:")
+            print(f"   1. LIVE channel ({TELEGRAM_LIVE_CHANNEL}) - where your messages are")
+            print(f"   2. TEST channel ({TELEGRAM_TEST_CHANNEL}) - for testing")
+
+            choice = input("\nSelect channel (1/2) [default: 1]: ").strip() or "1"
+
+            if choice == "1":
+                channel = TELEGRAM_LIVE_CHANNEL
+                print(f"\n✅ Using LIVE channel: {channel}")
+                if not test_mode:
+                    confirm = input("⚠️  This will update LIVE messages. Continue? (yes/no): ")
+                    if confirm.lower() not in ['yes', 'y']:
+                        print("❌ Cancelled")
+                        return
+            elif choice == "2":
+                channel = TELEGRAM_TEST_CHANNEL
+                print(f"\n✅ Using TEST channel: {channel}")
+                print("⚠️  Note: Messages might not exist in test channel")
+            else:
+                print("❌ Invalid choice")
+                return
 
     # Run sync
     await sync_events(channel, test_mode)
