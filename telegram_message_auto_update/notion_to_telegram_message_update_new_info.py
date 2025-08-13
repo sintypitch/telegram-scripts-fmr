@@ -902,22 +902,22 @@ async def sync_events(channel: str, test_mode: bool = False):
                         if reason != "Not in cache (rebuilding)":
                             print("   🔄 Applying changes...")
 
-                    # Try to update the message (text only - images cannot be updated)
-                    try:
-                        success = await update_telegram_message(
-                        client,
-                        channel,
-                        event['telegram_message_id'],
-                        new_text
-                        # Images cannot be updated in existing Telegram messages
-                    )
+                        # Try to update the message (text only - images cannot be updated)
+                        try:
+                            success = await update_telegram_message(
+                                client,
+                                channel,
+                                event['telegram_message_id'],
+                                new_text
+                                # Images cannot be updated in existing Telegram messages
+                            )
 
-                        if success:
-                            print("   ✅ Updated successfully")
-                            stats["updated"] += 1
+                            if success:
+                                print("   ✅ Updated successfully")
+                                stats["updated"] += 1
 
-                            # Update cache
-                            cache.update(TelegramMessage(
+                                # Update cache
+                                cache.update(TelegramMessage(
                                 message_id=event['telegram_message_id'],
                                 channel=channel,
                                 text=new_text,
@@ -940,19 +940,19 @@ async def sync_events(channel: str, test_mode: bool = False):
                                 }
                             ))
 
-                            # Update Notion timestamp
-                            update_notion_timestamp(event['id'])
-                        else:
-                            print("   ❌ Update failed")
-                            stats["errors"] += 1
+                                # Update Notion timestamp
+                                update_notion_timestamp(event['id'])
+                            else:
+                                print("   ❌ Update failed")
+                                stats["errors"] += 1
 
-                    except Exception as e:
-                        if "Content of the message was not modified" in str(e):
-                            print("   ℹ️  Message already has this content, updating cache")
-                            stats["identical"] += 1
+                        except Exception as e:
+                            if "Content of the message was not modified" in str(e):
+                                print("   ℹ️  Message already has this content, updating cache")
+                                stats["identical"] += 1
 
-                            # Update cache anyway
-                            cache.update(TelegramMessage(
+                                # Update cache anyway
+                                cache.update(TelegramMessage(
                                 message_id=event['telegram_message_id'],
                                 channel=channel,
                                 text=new_text,
@@ -975,11 +975,11 @@ async def sync_events(channel: str, test_mode: bool = False):
                                 }
                             ))
 
-                            # Update Notion timestamp
-                            update_notion_timestamp(event['id'])
-                        else:
-                            print(f"   ❌ Error: {e}")
-                            stats["errors"] += 1
+                                # Update Notion timestamp
+                                update_notion_timestamp(event['id'])
+                            else:
+                                print(f"   ❌ Error: {e}")
+                                stats["errors"] += 1
                 
                 # Successfully completed all events (end of for loop)
                 break  # Exit retry loop
