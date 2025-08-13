@@ -550,32 +550,22 @@ async def update_telegram_message(
     client: TelegramClient,
     channel: str,
     message_id: int,
-    new_text: str,
-    image_url: Optional[str] = None
+    new_text: str
 ) -> bool:
-    """Update a Telegram message with new text and optionally new image"""
+    """Update a Telegram message with new text only
+    
+    Note: Telegram does not allow updating images in existing messages.
+    Only the text/caption can be modified.
+    """
     try:
         # Get the channel entity
         channel_entity = await client.get_entity(channel)
 
-        # If image URL provided, download it
-        media = None
-        if image_url:
-            try:
-                img_response = requests.get(image_url, timeout=15)
-                if img_response.status_code == 200:
-                    img_bytes = io.BytesIO(img_response.content)
-                    img_bytes.name = "event.jpg"
-                    media = img_bytes
-            except:
-                print(f"   ⚠️  Failed to download new image, keeping existing")
-
-        # Edit the message
+        # Edit the message (text only)
         await client.edit_message(
             channel_entity,
             message_id,
             text=new_text,
-            file=media,
             parse_mode='html',
             link_preview=False
         )
@@ -912,14 +902,14 @@ async def sync_events(channel: str, test_mode: bool = False):
                         if reason != "Not in cache (rebuilding)":
                             print("   🔄 Applying changes...")
 
-                    # Try to update the message
+                    # Try to update the message (text only - images cannot be updated)
                     try:
                         success = await update_telegram_message(
                         client,
                         channel,
                         event['telegram_message_id'],
-                        new_text,
-                        event.get('image_url') or event.get('socials_img_url')
+                        new_text
+                        # Images cannot be updated in existing Telegram messages
                     )
 
                         if success:
