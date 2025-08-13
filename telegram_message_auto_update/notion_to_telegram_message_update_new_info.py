@@ -70,7 +70,13 @@ load_dotenv()
 # ═══════════════════════════════════════════════════════════════
 
 # Get script directory for log file
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+# In Replit, __file__ might not be reliable, so also check working directory
+if 'REPL_ID' in os.environ and not os.path.abspath(__file__).startswith('/'):
+    # Replit sometimes has issues with __file__, use cwd
+    SCRIPT_DIR = os.getcwd()
+else:
+    SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+    
 LOG_FILE = os.path.join(SCRIPT_DIR, 'updater_run.log')
 
 # Configure logging to both file and console
@@ -145,33 +151,39 @@ TELEGRAM_TEST_CHANNEL = os.getenv('TELEGRAM_TEST_CHANNEL', 'testchannel123412343
 # Cache Configuration
 CACHE_FILE = os.path.join(SCRIPT_DIR, 'telegram_messages_cache.json')
 
-# Session Configuration - use a consistent location that works for both manual and cron
+# Session Configuration - always use the same session file name
 def get_session_file():
-    """Get session file that works for both manual runs and cron jobs"""
-    # For Replit, always use the script directory where the session was created manually
-    # This ensures cron jobs can access the same authenticated session
-    if 'REPL_ID' in os.environ:
-        # In Replit, use the script directory (where we manually authenticated)
-        session_dir = SCRIPT_DIR
-        session_name = "updater_session"  # Same name as before for compatibility
-    else:
-        # Local environment
-        session_dir = SCRIPT_DIR
-        session_name = "local_updater_session"
+    """Get session file - use consistent name for compatibility"""
+    # ALWAYS use 'updater_session' for compatibility with existing authenticated session
+    session_name = "updater_session"
+    session_dir = SCRIPT_DIR
     
     # Create directory if it doesn't exist
     if not os.path.exists(session_dir):
         os.makedirs(session_dir, mode=0o755)
     
     session_path = os.path.join(session_dir, session_name)
+    session_file_path = f"{session_path}.session"
     
     # Check if session file exists
-    session_file_path = f"{session_path}.session"
     if os.path.exists(session_file_path):
         log_print(f"📱 Found existing session: {session_file_path}")
+        log_print(f"   Session size: {os.path.getsize(session_file_path)} bytes")
+        log_print(f"   Session modified: {datetime.fromtimestamp(os.path.getmtime(session_file_path)).strftime('%Y-%m-%d %H:%M:%S')}")
     else:
         log_print(f"⚠️  No session found at: {session_file_path}")
-        log_print("   You may need to authenticate manually first")
+        # Check for alternative session files to use
+        alt_sessions = [
+            "local_updater_session.session",
+            "replit_updater_session.session", 
+            "../telegram_event_scheduler/scheduler_session.session"
+        ]
+        for alt in alt_sessions:
+            alt_path = os.path.join(session_dir, alt)
+            if os.path.exists(alt_path):
+                log_print(f"   Found alternative session: {alt}")
+                log_print(f"   Consider copying it to {session_file_path}")
+                break
     
     return session_path
 
