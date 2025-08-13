@@ -92,13 +92,9 @@ TELEGRAM_TEST_CHANNEL = os.getenv('TELEGRAM_TEST_CHANNEL', 'testchannel123412343
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_FILE = os.path.join(SCRIPT_DIR, 'telegram_messages_cache.json')
 
-# Session Configuration - use environment-specific session names
-import platform
-import hashlib
-# Create a unique session name based on hostname/environment
-hostname = platform.node() or "default"
-session_hash = hashlib.md5(hostname.encode()).hexdigest()[:8]
-SESSION_FILE = os.path.join(SCRIPT_DIR, f'updater_session_{session_hash}')
+# Session Configuration - use a consistent session name in the script directory
+# This session will be reused across all runs (manual, cron, PyCharm, Replit)
+SESSION_FILE = os.path.join(SCRIPT_DIR, 'updater_session')
 print(f"📱 Using session file: {SESSION_FILE}")
 
 TIMEZONE = ZoneInfo(os.getenv('TIMEZONE', 'Europe/Brussels'))
