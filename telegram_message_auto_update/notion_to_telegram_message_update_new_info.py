@@ -871,27 +871,27 @@ async def sync_events(channel: str, test_mode: bool = False):
 
                         # Always update cache (important for rebuilding)
                         cache.update(TelegramMessage(
-                        message_id=event['telegram_message_id'],
-                        channel=channel,
-                        text=new_text,
-                        image_url=event.get('socials_img_url'),
-                        last_updated=datetime.now(TIMEZONE).isoformat(),
-                        notion_id=event['id'],
-                        event_data={
-                            # Match exact Notion field names
-                            "title": event.get('title', ''),
-                            "event_date": event.get('event_date'),  # YYYY-MM-DD format
-                            "until_date": event.get('until_date'),   # YYYY-MM-DD or null
-                            "event_location": event.get('event_location', ''),
-                            "start_time": event.get('start_time', ''),
-                            "raw_lineup": event.get('raw_lineup', ''),
-                            "event_url": event.get('event_url'),
-                            "facebook_event_url": event.get('facebook_event_url'),
-                            "ticketswap_url": event.get('ticketswap_url'),
-                            "ig_post_url": event.get('ig_post_url'),
-                            "socials_img_url": event.get('socials_img_url')
-                        }
-                    ))
+                            message_id=event['telegram_message_id'],
+                            channel=channel,
+                            text=new_text,
+                            image_url=event.get('socials_img_url'),
+                            last_updated=datetime.now(TIMEZONE).isoformat(),
+                            notion_id=event['id'],
+                            event_data={
+                                # Match exact Notion field names
+                                "title": event.get('title', ''),
+                                "event_date": event.get('event_date'),  # YYYY-MM-DD format
+                                "until_date": event.get('until_date'),   # YYYY-MM-DD or null
+                                "event_location": event.get('event_location', ''),
+                                "start_time": event.get('start_time', ''),
+                                "raw_lineup": event.get('raw_lineup', ''),
+                                "event_url": event.get('event_url'),
+                                "facebook_event_url": event.get('facebook_event_url'),
+                                "ticketswap_url": event.get('ticketswap_url'),
+                                "ig_post_url": event.get('ig_post_url'),
+                                "socials_img_url": event.get('socials_img_url')
+                                }
+                            ))
 
                         # Only update Notion timestamp if we're doing actual sync, not cache rebuild
                         if reason != "Not in cache (rebuilding)":
@@ -918,13 +918,13 @@ async def sync_events(channel: str, test_mode: bool = False):
 
                             # Update cache
                             cache.update(TelegramMessage(
-                            message_id=event['telegram_message_id'],
-                            channel=channel,
-                            text=new_text,
-                            image_url=event.get('socials_img_url'),
-                            last_updated=datetime.now(TIMEZONE).isoformat(),
-                            notion_id=event['id'],
-                            event_data={
+                                message_id=event['telegram_message_id'],
+                                channel=channel,
+                                text=new_text,
+                                image_url=event.get('socials_img_url'),
+                                last_updated=datetime.now(TIMEZONE).isoformat(),
+                                notion_id=event['id'],
+                                event_data={
                                 # Match exact Notion field names
                                 "title": event.get('title', ''),
                                 "event_date": event.get('event_date'),  # YYYY-MM-DD format
@@ -937,8 +937,8 @@ async def sync_events(channel: str, test_mode: bool = False):
                                 "ticketswap_url": event.get('ticketswap_url'),
                                 "ig_post_url": event.get('ig_post_url'),
                                 "socials_img_url": event.get('socials_img_url')
-                            }
-                        ))
+                                }
+                            ))
 
                             # Update Notion timestamp
                             update_notion_timestamp(event['id'])
@@ -953,13 +953,13 @@ async def sync_events(channel: str, test_mode: bool = False):
 
                             # Update cache anyway
                             cache.update(TelegramMessage(
-                            message_id=event['telegram_message_id'],
-                            channel=channel,
-                            text=new_text,
-                            image_url=event.get('socials_img_url'),
-                            last_updated=datetime.now(TIMEZONE).isoformat(),
-                            notion_id=event['id'],
-                            event_data={
+                                message_id=event['telegram_message_id'],
+                                channel=channel,
+                                text=new_text,
+                                image_url=event.get('socials_img_url'),
+                                last_updated=datetime.now(TIMEZONE).isoformat(),
+                                notion_id=event['id'],
+                                event_data={
                                 # Match exact Notion field names
                                 "title": event.get('title', ''),
                                 "event_date": event.get('event_date'),  # YYYY-MM-DD format
@@ -972,8 +972,8 @@ async def sync_events(channel: str, test_mode: bool = False):
                                 "ticketswap_url": event.get('ticketswap_url'),
                                 "ig_post_url": event.get('ig_post_url'),
                                 "socials_img_url": event.get('socials_img_url')
-                            }
-                        ))
+                                }
+                            ))
 
                             # Update Notion timestamp
                             update_notion_timestamp(event['id'])
