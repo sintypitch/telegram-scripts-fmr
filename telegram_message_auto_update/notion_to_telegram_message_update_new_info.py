@@ -729,149 +729,67 @@ async def sync_events(channel: str, test_mode: bool = False):
     try:
         async with TelegramClient(SESSION_FILE, api_id, api_hash) as client:
             for event in events:
-            stats["checked"] += 1
+                stats["checked"] += 1
 
-            # Check if update needed
-            needs_update, reason = await check_needs_update(event, cache, channel)
+                # Check if update needed
+                needs_update, reason = await check_needs_update(event, cache, channel)
 
-            if not needs_update:
-                print(f"⏭️  {event['title'][:30]}... - {reason}")
-                stats["skipped"] += 1
-                continue
+                if not needs_update:
+                    print(f"⏭️  {event['title'][:30]}... - {reason}")
+                    stats["skipped"] += 1
+                    continue
 
-            print(f"\n📝 {event['title']}")
-            print(f"   Message ID: {event['telegram_message_id']}")
-            print(f"   Reason: {reason}")
+                print(f"\n📝 {event['title']}")
+                print(f"   Message ID: {event['telegram_message_id']}")
+                print(f"   Reason: {reason}")
 
-            if test_mode:
-                print("   [TEST MODE] Would update this message")
-                stats["updated"] += 1
-                continue
-
-            # Get current message from Telegram
-            current_text = await get_telegram_message(client, channel, event['telegram_message_id'])
-            if current_text is None:
-                print(f"   ❌ Message not found on Telegram")
-                stats["errors"] += 1
-                continue
-
-            # Build new message text
-            new_text = build_message_text(event)
-
-            # Show detailed changes (but not if we're just rebuilding cache)
-            if reason == "Not in cache (rebuilding)":
-                # When rebuilding cache, don't show spurious changes
-                has_changes = False
-            else:
-                has_changes = compare_and_show_changes(current_text, new_text, event)
-
-            # Normalize text for comparison (handle markdown vs HTML bold formats)
-            def normalize_for_comparison(text):
-                """Normalize text to handle both markdown and HTML bold formats"""
-                if not text:
-                    return ""
-                # Convert markdown bold to HTML bold for comparison
-                import re
-                normalized = text.strip()
-                # Convert **text** to <b>text</b>
-                normalized = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', normalized)
-                return normalized
-            
-            # Compare normalized versions for actual update decision
-            current_normalized = normalize_for_comparison(current_text)
-            new_normalized = normalize_for_comparison(new_text)
-
-            # Check if actually different
-            if current_normalized == new_normalized:
-                if reason == "Not in cache (rebuilding)":
-                    print("   ✅ Rebuilding cache entry")
-                else:
-                    print("   ✅ Content identical")
-                stats["identical"] += 1
-
-                # Always update cache (important for rebuilding)
-                cache.update(TelegramMessage(
-                    message_id=event['telegram_message_id'],
-                    channel=channel,
-                    text=new_text,
-                    image_url=event.get('socials_img_url'),
-                    last_updated=datetime.now(TIMEZONE).isoformat(),
-                    notion_id=event['id'],
-                    event_data={
-                        # Match exact Notion field names
-                        "title": event.get('title', ''),
-                        "event_date": event.get('event_date'),  # YYYY-MM-DD format
-                        "until_date": event.get('until_date'),   # YYYY-MM-DD or null
-                        "event_location": event.get('event_location', ''),
-                        "start_time": event.get('start_time', ''),
-                        "raw_lineup": event.get('raw_lineup', ''),
-                        "event_url": event.get('event_url'),
-                        "facebook_event_url": event.get('facebook_event_url'),
-                        "ticketswap_url": event.get('ticketswap_url'),
-                        "ig_post_url": event.get('ig_post_url'),
-                        "socials_img_url": event.get('socials_img_url')
-                    }
-                ))
-
-                # Only update Notion timestamp if we're doing actual sync, not cache rebuild
-                if reason != "Not in cache (rebuilding)":
-                    update_notion_timestamp(event['id'])
-                continue
-
-            if has_changes or (reason == "Not in cache (rebuilding)" and current_normalized != new_normalized):
-                if reason != "Not in cache (rebuilding)":
-                    print("   🔄 Applying changes...")
-
-            # Try to update the message
-            try:
-                success = await update_telegram_message(
-                    client,
-                    channel,
-                    event['telegram_message_id'],
-                    new_text,
-                    event.get('image_url') or event.get('socials_img_url')
-                )
-
-                if success:
-                    print("   ✅ Updated successfully")
+                if test_mode:
+                    print("   [TEST MODE] Would update this message")
                     stats["updated"] += 1
+                    continue
 
-                    # Update cache
-                    cache.update(TelegramMessage(
-                        message_id=event['telegram_message_id'],
-                        channel=channel,
-                        text=new_text,
-                        image_url=event.get('socials_img_url'),
-                        last_updated=datetime.now(TIMEZONE).isoformat(),
-                        notion_id=event['id'],
-                        event_data={
-                            # Match exact Notion field names
-                            "title": event.get('title', ''),
-                            "event_date": event.get('event_date'),  # YYYY-MM-DD format
-                            "until_date": event.get('until_date'),   # YYYY-MM-DD or null
-                            "event_location": event.get('event_location', ''),
-                            "start_time": event.get('start_time', ''),
-                            "raw_lineup": event.get('raw_lineup', ''),
-                            "event_url": event.get('event_url'),
-                            "facebook_event_url": event.get('facebook_event_url'),
-                            "ticketswap_url": event.get('ticketswap_url'),
-                            "ig_post_url": event.get('ig_post_url'),
-                            "socials_img_url": event.get('socials_img_url')
-                        }
-                    ))
-
-                    # Update Notion timestamp
-                    update_notion_timestamp(event['id'])
-                else:
-                    print("   ❌ Update failed")
+                # Get current message from Telegram
+                current_text = await get_telegram_message(client, channel, event['telegram_message_id'])
+                if current_text is None:
+                    print(f"   ❌ Message not found on Telegram")
                     stats["errors"] += 1
+                    continue
 
-            except Exception as e:
-                if "Content of the message was not modified" in str(e):
-                    print("   ℹ️  Message already has this content, updating cache")
+                # Build new message text
+                new_text = build_message_text(event)
+
+                # Show detailed changes (but not if we're just rebuilding cache)
+                if reason == "Not in cache (rebuilding)":
+                    # When rebuilding cache, don't show spurious changes
+                    has_changes = False
+                else:
+                    has_changes = compare_and_show_changes(current_text, new_text, event)
+
+                # Normalize text for comparison (handle markdown vs HTML bold formats)
+                def normalize_for_comparison(text):
+                    """Normalize text to handle both markdown and HTML bold formats"""
+                    if not text:
+                        return ""
+                    # Convert markdown bold to HTML bold for comparison
+                    import re
+                    normalized = text.strip()
+                    # Convert **text** to <b>text</b>
+                    normalized = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', normalized)
+                    return normalized
+                
+                # Compare normalized versions for actual update decision
+                current_normalized = normalize_for_comparison(current_text)
+                new_normalized = normalize_for_comparison(new_text)
+
+                # Check if actually different
+                if current_normalized == new_normalized:
+                    if reason == "Not in cache (rebuilding)":
+                        print("   ✅ Rebuilding cache entry")
+                    else:
+                        print("   ✅ Content identical")
                     stats["identical"] += 1
 
-                    # Update cache anyway
+                    # Always update cache (important for rebuilding)
                     cache.update(TelegramMessage(
                         message_id=event['telegram_message_id'],
                         channel=channel,
@@ -895,11 +813,93 @@ async def sync_events(channel: str, test_mode: bool = False):
                         }
                     ))
 
-                    # Update Notion timestamp
-                    update_notion_timestamp(event['id'])
-                else:
-                    print(f"   ❌ Error: {e}")
-                    stats["errors"] += 1
+                    # Only update Notion timestamp if we're doing actual sync, not cache rebuild
+                    if reason != "Not in cache (rebuilding)":
+                        update_notion_timestamp(event['id'])
+                    continue
+
+                if has_changes or (reason == "Not in cache (rebuilding)" and current_normalized != new_normalized):
+                    if reason != "Not in cache (rebuilding)":
+                        print("   🔄 Applying changes...")
+
+                # Try to update the message
+                try:
+                    success = await update_telegram_message(
+                        client,
+                        channel,
+                        event['telegram_message_id'],
+                        new_text,
+                        event.get('image_url') or event.get('socials_img_url')
+                    )
+
+                    if success:
+                        print("   ✅ Updated successfully")
+                        stats["updated"] += 1
+
+                        # Update cache
+                        cache.update(TelegramMessage(
+                            message_id=event['telegram_message_id'],
+                            channel=channel,
+                            text=new_text,
+                            image_url=event.get('socials_img_url'),
+                            last_updated=datetime.now(TIMEZONE).isoformat(),
+                            notion_id=event['id'],
+                            event_data={
+                                # Match exact Notion field names
+                                "title": event.get('title', ''),
+                                "event_date": event.get('event_date'),  # YYYY-MM-DD format
+                                "until_date": event.get('until_date'),   # YYYY-MM-DD or null
+                                "event_location": event.get('event_location', ''),
+                                "start_time": event.get('start_time', ''),
+                                "raw_lineup": event.get('raw_lineup', ''),
+                                "event_url": event.get('event_url'),
+                                "facebook_event_url": event.get('facebook_event_url'),
+                                "ticketswap_url": event.get('ticketswap_url'),
+                                "ig_post_url": event.get('ig_post_url'),
+                                "socials_img_url": event.get('socials_img_url')
+                            }
+                        ))
+
+                        # Update Notion timestamp
+                        update_notion_timestamp(event['id'])
+                    else:
+                        print("   ❌ Update failed")
+                        stats["errors"] += 1
+
+                except Exception as e:
+                    if "Content of the message was not modified" in str(e):
+                        print("   ℹ️  Message already has this content, updating cache")
+                        stats["identical"] += 1
+
+                        # Update cache anyway
+                        cache.update(TelegramMessage(
+                            message_id=event['telegram_message_id'],
+                            channel=channel,
+                            text=new_text,
+                            image_url=event.get('socials_img_url'),
+                            last_updated=datetime.now(TIMEZONE).isoformat(),
+                            notion_id=event['id'],
+                            event_data={
+                                # Match exact Notion field names
+                                "title": event.get('title', ''),
+                                "event_date": event.get('event_date'),  # YYYY-MM-DD format
+                                "until_date": event.get('until_date'),   # YYYY-MM-DD or null
+                                "event_location": event.get('event_location', ''),
+                                "start_time": event.get('start_time', ''),
+                                "raw_lineup": event.get('raw_lineup', ''),
+                                "event_url": event.get('event_url'),
+                                "facebook_event_url": event.get('facebook_event_url'),
+                                "ticketswap_url": event.get('ticketswap_url'),
+                                "ig_post_url": event.get('ig_post_url'),
+                                "socials_img_url": event.get('socials_img_url')
+                            }
+                        ))
+
+                        # Update Notion timestamp
+                        update_notion_timestamp(event['id'])
+                    else:
+                        print(f"   ❌ Error: {e}")
+                        stats["errors"] += 1
     except Exception as e:
         if "AuthKeyDuplicatedError" in str(e.__class__.__name__):
             print("\n❌ Session file error - The session is being used from multiple locations.")
