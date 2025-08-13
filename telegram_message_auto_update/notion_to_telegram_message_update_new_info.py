@@ -996,7 +996,7 @@ async def sync_events(channel: str, test_mode: bool = False):
                 retry_count += 1
                 if retry_count < max_retries:
                     log_print(f"🔄 Retrying connection (attempt {retry_count + 1}/{max_retries})...")
-                    await asyncio.sleep(2)  # Wait before retry
+                    # No need to sleep - retry immediately
                     continue
                 else:
                     log_print("\n❌ Max retries reached. Session conflict persists.", "ERROR")
