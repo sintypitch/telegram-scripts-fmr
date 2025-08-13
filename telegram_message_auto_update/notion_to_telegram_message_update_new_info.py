@@ -38,9 +38,10 @@ Run the script:
     python telegram_message_updater.py
 
 Options:
-    --test    Dry run mode (no actual updates)
-    --live    Use live channel
-    --auto    Skip all confirmations (for automation)
+    --test           Dry run mode (no actual updates)
+    --live           Use live channel
+    --auto           Skip all confirmations (for automation)
+    --clean-session  Delete existing session file before starting
 
 ═══════════════════════════════════════════════════════════════════════════════
 """
@@ -90,7 +91,16 @@ TELEGRAM_TEST_CHANNEL = os.getenv('TELEGRAM_TEST_CHANNEL', 'testchannel123412343
 # Cache Configuration
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_FILE = os.path.join(SCRIPT_DIR, 'telegram_messages_cache.json')
-SESSION_FILE = os.path.join(SCRIPT_DIR, 'updater_session')
+
+# Session Configuration - use environment-specific session names
+import platform
+import hashlib
+# Create a unique session name based on hostname/environment
+hostname = platform.node() or "default"
+session_hash = hashlib.md5(hostname.encode()).hexdigest()[:8]
+SESSION_FILE = os.path.join(SCRIPT_DIR, f'updater_session_{session_hash}')
+print(f"📱 Using session file: {SESSION_FILE}")
+
 TIMEZONE = ZoneInfo(os.getenv('TIMEZONE', 'Europe/Brussels'))
 
 # Initialize Notion client
@@ -726,6 +736,14 @@ async def sync_events(channel: str, test_mode: bool = False):
     print("\n🔄 CHECKING FOR UPDATES")
     print("=" * 50)
 
+    # Check if we should clean the session
+    import sys
+    if '--clean-session' in sys.argv:
+        session_path = f"{SESSION_FILE}.session"
+        if os.path.exists(session_path):
+            os.remove(session_path)
+            print(f"🗑️  Deleted old session file: {session_path}")
+    
     try:
         async with TelegramClient(SESSION_FILE, api_id, api_hash) as client:
             for event in events:
@@ -902,11 +920,16 @@ async def sync_events(channel: str, test_mode: bool = False):
                         stats["errors"] += 1
     except Exception as e:
         if "AuthKeyDuplicatedError" in str(e.__class__.__name__):
-            print("\n❌ Session file error - The session is being used from multiple locations.")
-            print("   To fix this on Replit:")
-            print("   1. Delete the session file in the script directory")
-            print("   2. Re-run the script to create a new session")
-            print("   3. You'll need to re-authenticate with Telegram")
+            print("\n⚠️  Session conflict detected. Cleaning up...")
+            # Try to delete the session and inform user
+            session_path = f"{SESSION_FILE}.session"
+            if os.path.exists(session_path):
+                os.remove(session_path)
+                print(f"🗑️  Deleted corrupted session: {session_path}")
+            
+            print("\n📱 Session cleaned. Please run the script again.")
+            print("   You may need to re-authenticate with your phone number.")
+            print("\n💡 Tip: Use --clean-session flag to force a fresh session")
             return
         else:
             print(f"\n❌ Unexpected error: {e}")
