@@ -755,16 +755,35 @@ async def sync_events(channel: str, test_mode: bool = False):
             # Build new message text
             new_text = build_message_text(event)
 
-            # Show detailed changes
-            has_changes = compare_and_show_changes(current_text, new_text, event)
+            # Show detailed changes (but not if we're just rebuilding cache)
+            if reason == "Not in cache (rebuilding)":
+                # When rebuilding cache, don't show spurious changes
+                has_changes = False
+            else:
+                has_changes = compare_and_show_changes(current_text, new_text, event)
 
+            # Normalize text for comparison (handle markdown vs HTML bold formats)
+            def normalize_for_comparison(text):
+                """Normalize text to handle both markdown and HTML bold formats"""
+                if not text:
+                    return ""
+                # Convert markdown bold to HTML bold for comparison
+                import re
+                normalized = text.strip()
+                # Convert **text** to <b>text</b>
+                normalized = re.sub(r'\*\*([^*]+)\*\*', r'<b>\1</b>', normalized)
+                return normalized
+            
             # Compare normalized versions for actual update decision
-            current_normalized = current_text.strip() if current_text else ""
-            new_normalized = new_text.strip()
+            current_normalized = normalize_for_comparison(current_text)
+            new_normalized = normalize_for_comparison(new_text)
 
             # Check if actually different
             if current_normalized == new_normalized:
-                print("   ✅ Content identical, updating cache")
+                if reason == "Not in cache (rebuilding)":
+                    print("   ✅ Rebuilding cache entry")
+                else:
+                    print("   ✅ Content identical")
                 stats["identical"] += 1
 
                 # Always update cache (important for rebuilding)
@@ -796,8 +815,9 @@ async def sync_events(channel: str, test_mode: bool = False):
                     update_notion_timestamp(event['id'])
                 continue
 
-            if has_changes:
-                print("   🔄 Applying changes...")
+            if has_changes or (reason == "Not in cache (rebuilding)" and current_normalized != new_normalized):
+                if reason != "Not in cache (rebuilding)":
+                    print("   🔄 Applying changes...")
 
             # Try to update the message
             try:
