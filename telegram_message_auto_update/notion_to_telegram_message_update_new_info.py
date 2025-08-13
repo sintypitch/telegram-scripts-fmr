@@ -628,6 +628,23 @@ def compare_and_show_changes(current_text: str, new_text: str, event: dict = Non
                 print("   🔄 Ticketswap URL changed")
                 has_changes = True
 
+        # Check Instagram URL specifically - handle both missing and changed URLs
+        new_ig_url = event.get('ig_url') or event.get('ig_post_url')
+        if new_ig_url:  # If we have an IG URL in Notion
+            if not current_has_ig:
+                # IG URL exists in Notion but missing from Telegram message
+                print("   ➕ Instagram URL missing from message - will add it")
+                has_changes = True
+            else:
+                # Both have IG, check if URL changed
+                import re
+                current_ig_match = re.search(r'href=[\'"]([^\'"]+)[\'"]>↗ IG</a>', current_text)
+                if current_ig_match and current_ig_match.group(1) != new_ig_url:
+                    print("   🔄 Instagram URL changed")
+                    print(f"      From: {current_ig_match.group(1)}")
+                    print(f"      To:   {new_ig_url}")
+                    has_changes = True
+
     # Check for other non-link changes
     title_changed = False
     lineup_changed = False
