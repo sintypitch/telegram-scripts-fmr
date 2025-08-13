@@ -51,6 +51,8 @@ import json
 import os
 import requests
 import io
+import logging
+import sys
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Dict, Optional, List, Tuple
@@ -62,6 +64,58 @@ from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
+
+# ═══════════════════════════════════════════════════════════════
+# LOGGING CONFIGURATION FOR REPLIT
+# ═══════════════════════════════════════════════════════════════
+
+# Get script directory for log file
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(SCRIPT_DIR, 'updater_run.log')
+
+# Configure logging to both file and console
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(LOG_FILE, mode='a', encoding='utf-8'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+# Custom print function that logs and prints
+def log_print(message, level="INFO"):
+    """Print and log a message with timestamp"""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    full_message = f"[{timestamp}] {message}"
+    
+    # Print to console (for manual runs)
+    print(message)
+    
+    # Log to file (for scheduled runs)
+    if level == "ERROR":
+        logger.error(message)
+    elif level == "WARNING":
+        logger.warning(message)
+    else:
+        logger.info(message)
+    
+    # Force flush to ensure immediate writing
+    sys.stdout.flush()
+    for handler in logger.handlers:
+        if isinstance(handler, logging.FileHandler):
+            handler.flush()
+
+# Log startup
+log_print("=" * 50)
+log_print("SCRIPT STARTED - Telegram Message Updater")
+log_print(f"Environment: {'REPLIT' if 'REPL_ID' in os.environ else 'LOCAL'}")
+log_print(f"Working directory: {os.getcwd()}")
+log_print(f"Script directory: {SCRIPT_DIR}")
+log_print(f"Log file: {LOG_FILE}")
+log_print("=" * 50)
 
 # ═══════════════════════════════════════════════════════════════
 # CONFIGURATION
@@ -89,13 +143,12 @@ TELEGRAM_LIVE_CHANNEL = os.getenv('TELEGRAM_LIVE_CHANNEL', 'raveinbelgium')
 TELEGRAM_TEST_CHANNEL = os.getenv('TELEGRAM_TEST_CHANNEL', 'testchannel1234123434')
 
 # Cache Configuration
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_FILE = os.path.join(SCRIPT_DIR, 'telegram_messages_cache.json')
 
 # Session Configuration - use a consistent session name in the script directory
 # This session will be reused across all runs (manual, cron, PyCharm, Replit)
 SESSION_FILE = os.path.join(SCRIPT_DIR, 'updater_session')
-print(f"📱 Using session file: {SESSION_FILE}")
+log_print(f"📱 Using session file: {SESSION_FILE}")
 
 TIMEZONE = ZoneInfo(os.getenv('TIMEZONE', 'Europe/Brussels'))
 
@@ -175,9 +228,9 @@ class MessageCache:
                     data = json.load(f)
                     for key, msg_data in data.items():
                         self.messages[key] = TelegramMessage.from_dict(msg_data)
-                print(f"📦 Loaded {len(self.messages)} cached messages")
+                log_print(f"📦 Loaded {len(self.messages)} cached messages")
             except Exception as e:
-                print(f"⚠️  Cache load error: {e}. Starting fresh.")
+                log_print(f"⚠️  Cache load error: {e}. Starting fresh.", "WARNING")
                 self.messages = {}
 
     def save(self):
@@ -189,9 +242,9 @@ class MessageCache:
             }
             with open(self.cache_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            print(f"💾 Saved {len(self.messages)} messages to cache")
+            log_print(f"💾 Saved {len(self.messages)} messages to cache")
         except Exception as e:
-            print(f"❌ Cache save error: {e}")
+            log_print(f"❌ Cache save error: {e}", "ERROR")
 
     def get(self, channel: str, message_id: int) -> Optional[TelegramMessage]:
         """Get a cached message using channel:id as key"""
@@ -240,7 +293,7 @@ def fetch_events_with_telegram_ids(channel: str) -> List[dict]:
     has_more = True
     cursor = None
 
-    print("Querying Notion database...")
+    log_print("Querying Notion database...")
 
     # Get today's date for filtering
     today = datetime.now().date()
