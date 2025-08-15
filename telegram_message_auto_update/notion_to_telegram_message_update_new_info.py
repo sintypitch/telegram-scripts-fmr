@@ -53,6 +53,7 @@ import requests
 import io
 import logging
 import sys
+import argparse
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Dict, Optional, List, Tuple
@@ -1061,51 +1062,72 @@ async def sync_events(channel: str, test_mode: bool = False):
 # ═══════════════════════════════════════════════════════════════
 
 async def main():
-    """Main entry point"""
+    """Main entry point with standardized arguments"""
     import sys
-
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="Telegram Message Updater - Updates existing Telegram messages with changes from Notion",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python notion_to_telegram_message_update_new_info.py --live --auto
+  python notion_to_telegram_message_update_new_info.py --test
+  python notion_to_telegram_message_update_new_info.py --dry-run
+        """
+    )
+    
+    parser.add_argument('--auto', action='store_true', help='Skip all confirmations (for automation)')
+    parser.add_argument('--dry-run', action='store_true', help='Preview changes without updating')
+    parser.add_argument('--clean-session', action='store_true', help='Delete existing session file before starting')
+    
+    channel_group = parser.add_mutually_exclusive_group()
+    channel_group.add_argument('--live', action='store_true', help='Use live channel for updates')
+    channel_group.add_argument('--test', action='store_true', help='Test mode - no actual updates')
+    
+    args = parser.parse_args()
+    
     print("=" * 50)
     print("      TELEGRAM MESSAGE UPDATER")
     print("=" * 50)
-
-    # Parse command line arguments
-    test_mode = '--test' in sys.argv
-    use_live = '--live' in sys.argv
-    auto_mode = '--auto' in sys.argv
-
+    
+    # Handle session cleaning
+    if args.clean_session:
+        session_file = 'updater_session.session'
+        if os.path.exists(session_file):
+            os.remove(session_file)
+            print("🗑️  Session file cleared")
+    
+    # Determine mode
+    test_mode = args.dry_run or args.test
+    
     if test_mode:
         print("\n🧪 TEST MODE - no actual updates")
-
+    
     # Determine channel
-    if use_live:
+    if args.live:
         channel = TELEGRAM_LIVE_CHANNEL
         print(f"\n📡 Using LIVE channel: {channel}")
-        print("   This is where your actual messages are posted")
-        if not test_mode and not auto_mode:
-            confirm = input("⚠️  Are you sure you want to update LIVE messages? (yes/no): ")
-            if confirm.lower() not in ['yes', 'y']:
+        if not test_mode and not args.auto:
+            confirm = input("⚠️  Are you sure you want to update LIVE messages? (yes/no): ").strip().lower()
+            if confirm not in ['yes', 'y']:
                 print("❌ Cancelled")
                 return
     else:
-        # Default to live channel for reading (since that's where messages are)
-        if auto_mode:
-            # In auto mode, default to live channel
-            channel = TELEGRAM_LIVE_CHANNEL
-            print(f"\n📡 Auto mode: Using LIVE channel: {channel}")
-        else:
-            # Manual mode - ask for channel selection
+        # Interactive mode if no channel specified
+        if not args.auto:
             print(f"\n📡 Channel selection:")
             print(f"   1. LIVE channel ({TELEGRAM_LIVE_CHANNEL}) - where your messages are")
             print(f"   2. TEST channel ({TELEGRAM_TEST_CHANNEL}) - for testing")
-
+            
             choice = input("\nSelect channel (1/2) [default: 1]: ").strip() or "1"
-
+            
             if choice == "1":
                 channel = TELEGRAM_LIVE_CHANNEL
                 print(f"\n✅ Using LIVE channel: {channel}")
                 if not test_mode:
-                    confirm = input("⚠️  This will update LIVE messages. Continue? (yes/no): ")
-                    if confirm.lower() not in ['yes', 'y']:
+                    confirm = input("⚠️  This will update LIVE messages. Continue? (yes/no): ").strip().lower()
+                    if confirm not in ['yes', 'y']:
                         print("❌ Cancelled")
                         return
             elif choice == "2":
@@ -1115,7 +1137,11 @@ async def main():
             else:
                 print("❌ Invalid choice")
                 return
-
+        else:
+            # In auto mode, default to live channel
+            channel = TELEGRAM_LIVE_CHANNEL
+            print(f"\n📡 Auto mode: Using LIVE channel: {channel}")
+    
     # Run sync
     await sync_events(channel, test_mode)
 

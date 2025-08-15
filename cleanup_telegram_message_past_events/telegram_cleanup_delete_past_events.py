@@ -463,35 +463,41 @@ async def scan_and_clean_channel(channel_name: str, dry_run: bool = False, auto_
 # ═══════════════════════════════════════════════════════════════
 
 def parse_arguments():
-    """Parse command line arguments"""
+    """Parse command line arguments with standardized format"""
     parser = argparse.ArgumentParser(
         description="Telegram Channel Cleanup Tool - Remove past events from your channel",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python telegram_cleanup_delete_past_events.py --live
+  python telegram_cleanup_delete_past_events.py --live --auto
   python telegram_cleanup_delete_past_events.py --test
+  python telegram_cleanup_delete_past_events.py --dry-run
   python telegram_cleanup_delete_past_events.py --live --dry-run
-  python telegram_cleanup_delete_past_events.py
         """
+    )
+
+    parser.add_argument(
+        '--auto',
+        action='store_true',
+        help='Skip all confirmations (for automation)'
+    )
+    
+    parser.add_argument(
+        '--dry-run',
+        action='store_true',
+        help='Show what would be deleted without actually deleting'
     )
 
     channel_group = parser.add_mutually_exclusive_group()
     channel_group.add_argument(
         '--live',
         action='store_true',
-        help='Use live channel directly (skips channel selection)'
+        help='Use live channel for cleanup'
     )
     channel_group.add_argument(
         '--test',
         action='store_true',
-        help='Use test channel directly (skips channel selection)'
-    )
-
-    parser.add_argument(
-        '--dry-run',
-        action='store_true',
-        help='Show what would be deleted without actually deleting'
+        help='Use test channel for cleanup'
     )
 
     return parser.parse_args()
@@ -502,14 +508,16 @@ Examples:
 # ═══════════════════════════════════════════════════════════════
 
 def main():
-    """Main entry point"""
+    """Main entry point with standardized argument handling"""
     args = parse_arguments()
 
     print("=" * 70)
     print("       🧹 TELEGRAM CHANNEL CLEANUP TOOL")
     print("=" * 70)
-    print("\nThis tool will help you remove past events from your Telegram channel.")
-    print("Deleted messages cannot be recovered, so please use with caution.\n")
+    
+    if not args.auto:
+        print("\nThis tool will help you remove past events from your Telegram channel.")
+        print("Deleted messages cannot be recovered, so please use with caution.\n")
 
     # Determine channel based on arguments
     if args.live:
@@ -517,42 +525,53 @@ def main():
         print(f"📡 Using LIVE channel: {LIVE_CHANNEL}")
         
         if not args.dry_run:
-            print(f"\n⚠️  WARNING: Running on LIVE channel ({LIVE_CHANNEL})")
-            print("   Deletions cannot be undone!")
+            if not args.auto:
+                print(f"\n⚠️  WARNING: Running on LIVE channel ({LIVE_CHANNEL})")
+                print("   Deletions cannot be undone!")
+                confirm = input("   Are you sure you want to continue? (yes/no): ").strip().lower()
+                if confirm not in ['yes', 'y']:
+                    print("\n✅ Good call! Cancelled operation.")
+                    return
         else:
             print("   (Dry run mode - no actual deletions will occur)")
 
     elif args.test:
         channel = TEST_CHANNEL
         print(f"📝 Using TEST channel: {TEST_CHANNEL}")
-        print("   This is safe for testing the cleanup process.")
-
-    else:
-        # Interactive mode (original behavior)
-        print(f"Available channels:")
-        print(f"  📝 test: {TEST_CHANNEL}")
-        print(f"  📡 live: {LIVE_CHANNEL}")
-        print()
-
-        # Get channel selection
-        environment = input("Enter environment (test/live): ").strip().lower()
-
-        if environment == 'live':
-            channel = LIVE_CHANNEL
-            print(f"\n⚠️  WARNING: You selected the LIVE channel ({LIVE_CHANNEL})")
-            print("   Deletions in this channel cannot be undone!")
-            confirm = input("   Are you sure you want to continue? (yes/no): ").strip().lower()
-            if confirm not in ['yes', 'y']:
-                print("\n✅ Good call! Cancelled operation.")
-                return
-        else:
-            channel = TEST_CHANNEL
-            print(f"\n✅ Using TEST channel: {TEST_CHANNEL}")
+        if not args.auto:
             print("   This is safe for testing the cleanup process.")
 
+    else:
+        # Interactive mode if no channel specified
+        if args.auto:
+            # Default to test channel in auto mode if no channel specified
+            channel = TEST_CHANNEL
+            print(f"📝 Auto mode: defaulting to TEST channel: {TEST_CHANNEL}")
+        else:
+            print(f"Available channels:")
+            print(f"  1. Test channel ({TEST_CHANNEL})")
+            print(f"  2. Live channel ({LIVE_CHANNEL})")
+            print()
+
+            # Get channel selection
+            choice = input("Select channel (1/2): ").strip()
+
+            if choice == '2':
+                channel = LIVE_CHANNEL
+                print(f"\n⚠️  WARNING: You selected the LIVE channel ({LIVE_CHANNEL})")
+                print("   Deletions in this channel cannot be undone!")
+                confirm = input("   Are you sure you want to continue? (yes/no): ").strip().lower()
+                if confirm not in ['yes', 'y']:
+                    print("\n✅ Good call! Cancelled operation.")
+                    return
+            else:
+                channel = TEST_CHANNEL
+                print(f"\n✅ Using TEST channel: {TEST_CHANNEL}")
+                print("   This is safe for testing the cleanup process.")
+
     # Run the cleanup
-    # Auto-confirm deletions when using --live flag
-    auto_confirm = args.live
+    # Auto-confirm deletions when using --auto flag
+    auto_confirm = args.auto
     with client:
         client.loop.run_until_complete(scan_and_clean_channel(channel, args.dry_run, auto_confirm))
 

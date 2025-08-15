@@ -290,8 +290,11 @@ def calculate_urgency(event_date_str: str) -> str:
     today = datetime.now(TIMEZONE).date()
     days_until = (event_date - today).days
     
-    if days_until <= 0:
+    # Only mark as 'today' if the event is actually today (not past events)
+    if days_until == 0:
         return 'today'
+    elif days_until < 0:
+        return 'past'  # Past events should not be scheduled
     elif days_until <= URGENT_WEEK_DAYS:
         return 'this_week'
     else:
@@ -305,10 +308,11 @@ def generate_human_posting_times(events: List[Dict], window_start: datetime, win
     
     result = []
     
-    # Group events by urgency
+    # Group events by urgency (exclude past events)
     urgent_today = [e for e in events if calculate_urgency(e['date']) == 'today']
     urgent_week = [e for e in events if calculate_urgency(e['date']) == 'this_week']
     regular = [e for e in events if calculate_urgency(e['date']) == 'future']
+    past_events = [e for e in events if calculate_urgency(e['date']) == 'past']
     
     # Process urgent events first with minimal spacing
     current_time = window_start
@@ -502,10 +506,15 @@ def fetch_ready_events() -> list[dict]:
 
 
 def count_scheduled_events() -> int:
-    """Count how many events are already scheduled in Notion"""
+    """Count how many events are already scheduled (not yet published) in Notion"""
     response = notion.databases.query(
         database_id=NOTION_MASTER_DB_ID,
-        filter={"property": "telegram_scheduled_at", "date": {"is_not_empty": True}}
+        filter={
+            "and": [
+                {"property": "telegram_scheduled_at", "date": {"is_not_empty": True}},
+                {"property": "published_on_telegram", "checkbox": {"equals": False}}
+            ]
+        }
     )
     return len(response["results"])
 
@@ -680,7 +689,13 @@ async def schedule_all_events(channels: List[str], dry_run: bool = False, single
     urgent_today = [e for e in events if calculate_urgency(e['date']) == 'today']
     urgent_week = [e for e in events if calculate_urgency(e['date']) == 'this_week']
     regular = [e for e in events if calculate_urgency(e['date']) == 'future']
+    past_events = [e for e in events if calculate_urgency(e['date']) == 'past']
     
+    # Filter out past events from the main list
+    events = [e for e in events if calculate_urgency(e['date']) != 'past']
+    
+    if past_events:
+        print(f"   ⚠️  PAST: {len(past_events)} events (will be skipped)")
     if urgent_today:
         print(f"   🔥 TODAY: {len(urgent_today)} events")
     if urgent_week:
@@ -726,7 +741,11 @@ async def schedule_all_events(channels: List[str], dry_run: bool = False, single
         await client.start()
         
         while events_remaining and scheduled_count < MAX_SCHEDULED:
-            current_day = datetime.now(TIMEZONE).date() + timedelta(days=day_offset)
+            # For today's events, don't add day_offset if it's the first iteration
+            if day_offset == 0 and any(calculate_urgency(e['date']) == 'today' for e in events_remaining):
+                current_day = datetime.now(TIMEZONE).date()
+            else:
+                current_day = datetime.now(TIMEZONE).date() + timedelta(days=day_offset)
             
             # Check if we should skip today
             urgent_count = len([e for e in events_remaining if calculate_urgency(e['date']) in ['today', 'this_week']])

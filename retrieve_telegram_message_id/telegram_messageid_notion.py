@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import re
+import argparse
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple, Set
 from dataclasses import dataclass, asdict
@@ -686,35 +687,80 @@ async def run_cached_linker(test_mode: bool = False):
 
 
 def main():
-    """CLI entry point - simplified"""
+    """CLI entry point with standardized arguments"""
     import sys
-
-    if '--test' in sys.argv or '-t' in sys.argv:
-        asyncio.run(run_cached_linker(test_mode=True))
-    elif '--prod' in sys.argv or '-p' in sys.argv:
-        asyncio.run(run_cached_linker(test_mode=False))
-    elif '--clean' in sys.argv:
+    import argparse
+    
+    parser = argparse.ArgumentParser(
+        description="Telegram-Notion Message ID Linker - Links Telegram posts to Notion entries",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python telegram_messageid_notion.py --live --auto
+  python telegram_messageid_notion.py --test
+  python telegram_messageid_notion.py --dry-run
+  python telegram_messageid_notion.py --clean
+        """
+    )
+    
+    parser.add_argument('--auto', action='store_true', help='Skip all confirmations (for automation)')
+    parser.add_argument('--dry-run', action='store_true', help='Test mode - preview without making changes')
+    parser.add_argument('--clean', action='store_true', help='Clear the cache and exit')
+    
+    channel_group = parser.add_mutually_exclusive_group()
+    channel_group.add_argument('--live', action='store_true', help='Production mode - make actual changes')
+    channel_group.add_argument('--test', action='store_true', help='Test mode - no changes (same as --dry-run)')
+    
+    args = parser.parse_args()
+    
+    # Handle cache cleaning
+    if args.clean:
         if os.path.exists(CACHE_FILE):
             os.remove(CACHE_FILE)
             print("🗑️  Cache cleared")
         else:
             print("No cache to clear")
+        return
+    
+    # Determine mode
+    test_mode = args.dry_run or args.test
+    production_mode = args.live
+    
+    if production_mode:
+        if not args.auto:
+            confirm = input("⚠️  Will update Notion in PRODUCTION mode. Continue? (yes/no): ").strip().lower()
+            if confirm not in ['yes', 'y']:
+                print("❌ Cancelled")
+                return
+        asyncio.run(run_cached_linker(test_mode=False))
+    elif test_mode:
+        print("🧪 Running in TEST mode - no changes will be made")
+        asyncio.run(run_cached_linker(test_mode=True))
     else:
-        print("Telegram-Notion Linker")
-        print("-" * 30)
-        print("Usage:")
-        print("  --test, -t    Test mode (no changes)")
-        print("  --prod, -p    Production mode")
-        print("  --clean       Clear cache")
-        print()
-
-        choice = input("Run in [t]est or [p]roduction mode? ").lower()
-        if choice == 't':
-            asyncio.run(run_cached_linker(test_mode=True))
-        elif choice == 'p':
-            asyncio.run(run_cached_linker(test_mode=False))
+        # Interactive mode if no flags provided
+        if not args.auto:
+            print("Telegram-Notion Linker")
+            print("-" * 30)
+            print("Select mode:")
+            print("  1. Test mode (no changes)")
+            print("  2. Production mode (update Notion)")
+            print()
+            
+            choice = input("Select mode (1/2): ").strip()
+            if choice == '1':
+                asyncio.run(run_cached_linker(test_mode=True))
+            elif choice == '2':
+                confirm = input("⚠️  Will update Notion in PRODUCTION mode. Continue? (yes/no): ").strip().lower()
+                if confirm in ['yes', 'y']:
+                    asyncio.run(run_cached_linker(test_mode=False))
+                else:
+                    print("❌ Cancelled")
+            else:
+                print("❌ Invalid selection")
         else:
-            print("Cancelled.")
+            # In auto mode with no channel specified, default to test
+            print("📝 Auto mode with no channel specified - defaulting to TEST mode")
+            asyncio.run(run_cached_linker(test_mode=True))
 
 
 if __name__ == "__main__":
