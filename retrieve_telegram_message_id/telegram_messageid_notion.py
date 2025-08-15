@@ -39,8 +39,8 @@ if not TELEGRAM_API_ID or not TELEGRAM_API_HASH:
 api_id = int(TELEGRAM_API_ID)
 api_hash = TELEGRAM_API_HASH
 
-MASTER_DB_ID = "1f5b2c11515b801ebd95cd423b72eb55"
-LIVE_CHANNEL = 'raveinbelgium'
+MASTER_DB_ID = os.getenv('NOTION_MASTER_DB_ID', '1f5b2c11515b801ebd95cd423b72eb55')
+LIVE_CHANNEL = os.getenv('TELEGRAM_LIVE_CHANNEL', 'raveinbelgium')
 TEST_CHANNEL = os.getenv('TELEGRAM_TEST_CHANNEL', 'testchannel1234123434')
 CACHE_FILE = '../event_link_cache.json'
 CACHE_EXPIRY_DAYS = 30  # Keep cache for 30 days after event has passed
